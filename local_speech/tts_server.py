@@ -1,14 +1,49 @@
+"""
+Local Kokoro TTS HTTP server — speaks text as base64 WAV audio.
+
+Loads the Kokoro model once at startup and keeps it warm across
+requests, avoiding the per-request subprocess cold-start penalty.
+"""
+
 import base64
+import io
 import json
 import os
-import subprocess
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import numpy as np
 
 HOST = os.environ.get("CLICKY_TTS_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CLICKY_TTS_PORT", "8766"))
 MODEL = os.environ.get("CLICKY_TTS_MODEL", "mlx-community/Kokoro-82M-4bit")
 VOICE = os.environ.get("CLICKY_TTS_VOICE", "af_heart")
 LANGUAGE_CODE = os.environ.get("CLICKY_TTS_LANGUAGE_CODE", "a")
+
+
+# ── Warm model: loaded once at server startup ──────────────────────────────
+# We import the TTS loader lazily so the healthcheck is responsive before the
+# (potentially slow) first model download completes. On the very first boot
+# this will fetch ~57 files from HuggingFace; subsequent restarts use the
+# local HF cache.
+_tts_model = None  # type: ignore
+
+
+def _ensure_model():
+    """Lazy-load the Kokoro TTS model on first request (or explicit warm call)."""
+    global _tts_model
+    if _tts_model is not None:
+        return _tts_model
+
+    from mlx_audio.tts import load as load_tts_model
+
+    print(f"[clicky-tts] Loading TTS model {MODEL} -> voice={VOICE} lang={LANGUAGE_CODE}")
+    _tts_model = load_tts_model(MODEL, lazy=False)
+    print("[clicky-tts] Model loaded and warm")
+    return _tts_model
+
+
+# ── HTTP handler ───────────────────────────────────────────────────────────
 
 
 class TTSHandler(BaseHTTPRequestHandler):
@@ -22,6 +57,7 @@ class TTSHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
+            model_status = "warm" if _tts_model is not None else "cold"
             self._send_json(
                 200,
                 {
@@ -29,6 +65,7 @@ class TTSHandler(BaseHTTPRequestHandler):
                     "model": MODEL,
                     "voice": VOICE,
                     "languageCode": LANGUAGE_CODE,
+                    "modelStatus": model_status,
                 },
             )
             return
@@ -49,75 +86,76 @@ class TTSHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "missing_text"})
                 return
 
-            temp_directory_path = f"/tmp/clicky-tts-{os.getpid()}-{os.urandom(4).hex()}"
-            os.makedirs(temp_directory_path, exist_ok=True)
+            model = _ensure_model()
 
-            try:
-                command = [
-                    "python",
-                    "-m",
-                    "mlx_audio.tts.generate",
-                    "--model",
-                    MODEL,
-                    "--text",
-                    text,
-                    "--voice",
-                    VOICE,
-                    "--lang_code",
-                    LANGUAGE_CODE,
-                    "--output_path",
-                    temp_directory_path,
-                ]
+            # In-process synthesis: call model.generate() directly.
+            # This returns a generator of GenerationResult namedtuples; we
+            # consume the first (and typically only) segment.
+            results = model.generate(
+                text=text,
+                voice=VOICE,
+                speed=1.0,
+                lang_code=LANGUAGE_CODE,
+            )
 
-                process = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+            result = next(results)
+            audio_array = result.audio  # mx.array
 
-                if process.returncode != 0:
-                    error_message = (process.stdout or "") + "\n" + (process.stderr or "")
-                    self._send_json(500, {"ok": False, "error": error_message.strip()})
-                    return
+            # Convert MLX array → numpy for the WAV encoder
+            if hasattr(audio_array, "tolist"):
+                audio_np = np.array(audio_array.tolist(), dtype=np.float32)
+            else:
+                audio_np = np.asarray(audio_array, dtype=np.float32)
 
-                generated_files = [
-                    os.path.join(temp_directory_path, file_name)
-                    for file_name in os.listdir(temp_directory_path)
-                    if file_name.lower().endswith((".wav", ".mp3", ".m4a"))
-                ]
+            # Encode to WAV bytes in-memory (no temp files)
+            from mlx_audio.audio_io import write as audio_write
 
-                if not generated_files:
-                    self._send_json(500, {"ok": False, "error": "no_audio_file_generated"})
-                    return
+            wav_buffer = io.BytesIO()
+            audio_write(
+                wav_buffer,
+                audio_np,
+                samplerate=model.sample_rate,
+                format="wav",
+            )
 
-                newest_audio_file_path = max(generated_files, key=os.path.getmtime)
-                with open(newest_audio_file_path, "rb") as audio_file:
-                    audio_bytes = audio_file.read()
+            audio_base64 = base64.b64encode(wav_buffer.getvalue()).decode("utf-8")
+            self._send_json(200, {"ok": True, "audioBase64": audio_base64})
 
-                audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
-                self._send_json(200, {"ok": True, "audioBase64": audio_base64})
-            finally:
-                for file_name in os.listdir(temp_directory_path):
-                    try:
-                        os.remove(os.path.join(temp_directory_path, file_name))
-                    except OSError:
-                        pass
-                try:
-                    os.rmdir(temp_directory_path)
-                except OSError:
-                    pass
-
+        except ImportError as error:
+            self._send_json(
+                500,
+                {
+                    "ok": False,
+                    "error": (
+                        f"Missing dependency: {error}. "
+                        "Ensure mlx-audio and misaki are installed "
+                        "(uv run --with mlx-audio --with misaki --with soundfile …)."
+                    ),
+                },
+            )
         except Exception as error:
+            traceback.print_exc()
             self._send_json(500, {"ok": False, "error": str(error)})
 
     def log_message(self, format, *args):
         return
 
 
+# ── Entrypoint ─────────────────────────────────────────────────────────────
+
+
 def main():
     server = ThreadingHTTPServer((HOST, PORT), TTSHandler)
     print(f"[clicky-tts] listening on http://{HOST}:{PORT}")
+
+    # Pre-warm the model eagerly (can take several seconds on first boot
+    # but guarantees zero cold-start penalty for the first request).
+    try:
+        _ensure_model()
+    except Exception as exc:
+        print(f"[clicky-tts] WARNING: model pre-warm failed ({exc}). "
+              "The server will still accept requests and retry loading on demand.")
+
     server.serve_forever()
 
 

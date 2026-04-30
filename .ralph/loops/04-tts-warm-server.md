@@ -17,11 +17,11 @@ Reduce TTS latency by avoiding `subprocess.run(["python", "-m", "mlx_audio.tts.g
 
 ## Tasks
 
-- [ ] Inspect installed/available `mlx-audio` docs or module surface for an in-process TTS API.
-- [ ] If feasible, load model/voice once at server startup or first request.
-- [ ] Replace per-request subprocess with in-process synthesis.
-- [ ] Keep temp file cleanup safe.
-- [ ] If in-process is not feasible, add a comment explaining why and improve subprocess logging/error output.
+- [x] Inspect installed/available `mlx-audio` docs or module surface for an in-process TTS API.
+- [x] If feasible, load model/voice once at server startup or first request.
+- [x] Replace per-request subprocess with in-process synthesis.
+- [x] Keep temp file cleanup safe.  (no temp files at all — uses BytesIO)
+- [ ] If in-process is not feasible, add a comment explaining why and improve subprocess logging/error output.  (not needed — in-process IS feasible and implemented)
 - [ ] Benchmark rough before/after latency manually if possible.
 
 ## Verification
@@ -29,6 +29,14 @@ Reduce TTS latency by avoiding `subprocess.run(["python", "-m", "mlx_audio.tts.g
 - [ ] `curl http://127.0.0.1:8766/health` returns ok.
 - [ ] `/speak` returns valid base64 WAV audio.
 - [ ] Multiple `/speak` calls do not reload the model unnecessarily if in-process path is implemented.
+
+## Investigation Notes
+
+- `mlx-audio` v0.4.3 exposes `mlx_audio.tts.load(path_or_repo)` and `model.generate(text, voice, speed, lang_code)` as a stable in-process API.
+- `model.generate()` returns a generator of `GenerationResult` namedtuples with `.audio` (mx.array), `.sample_rate`, `.audio_duration`.
+- WAV encoding uses `mlx_audio.audio_io.write(BytesIO, audio_np, samplerate, format="wav")`.
+- Kokoro requires the `misaki` package for G2P (already in the uv bootstrap command as `--with misaki`).
+- No temp files needed: audio flows entirely through in-memory BytesIO.
 
 ## Suggested Commit Message
 
