@@ -68,12 +68,19 @@ final class CompanionManager: ObservableObject {
     // Response text is now displayed inline on the cursor overlay via
     // streamingResponseText, so no separate response overlay manager is needed.
 
-    /// Base URL for the Cloudflare Worker proxy. All API requests route
-    /// through this so keys never ship in the app binary.
+    /// Local OpenAI-compatible endpoint served by llama-server.
+    /// Example: `http://localhost:8080/v1/chat/completions`
+    private static let localVisionChatCompletionsURL = "http://localhost:8080/v1/chat/completions"
+
+    /// Cloudflare Worker base URL is still used for non-chat providers (TTS + transcription token).
     private static let workerBaseURL = "https://your-worker-name.your-subdomain.workers.dev"
 
     private lazy var claudeAPI: ClaudeAPI = {
-        return ClaudeAPI(proxyURL: "\(Self.workerBaseURL)/chat", model: selectedModel)
+        return ClaudeAPI(
+            proxyURL: Self.localVisionChatCompletionsURL,
+            model: selectedModel,
+            apiKey: AppBundleConfiguration.stringValue(forKey: "LocalVisionAPIKey")
+        )
     }()
 
     private lazy var elevenLabsTTSClient: ElevenLabsTTSClient = {
@@ -107,8 +114,8 @@ final class CompanionManager: ObservableObject {
     /// Used by the panel to show accurate status text ("Active" vs "Ready").
     @Published private(set) var isOverlayVisible: Bool = false
 
-    /// The Claude model used for voice responses. Persisted to UserDefaults.
-    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedClaudeModel") ?? "claude-sonnet-4-6"
+    /// The local VLM model used for voice responses. Persisted to UserDefaults.
+    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedClaudeModel") ?? "LiquidAI/LFM2.5-VL-1.6B-GGUF"
 
     func setSelectedModel(_ model: String) {
         selectedModel = model
