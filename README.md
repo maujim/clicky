@@ -20,7 +20,7 @@ This branch is local-model focused: local vision, local Whisper MLX speech-to-te
 - Xcode 15+
 - [`uv`](https://github.com/astral-sh/uv) available from Homebrew, `/usr/local/bin`, or `~/.local/bin`
 - A local OpenAI-compatible vision server listening at `http://127.0.0.1:8080/v1/chat/completions`
-- Optional: Node.js 18+ and Cloudflare/Wrangler if you want to use the legacy Worker fallback routes
+
 
 ### Run the app
 
@@ -47,25 +47,6 @@ The app starts two Python HTTP services through `uv`:
 
 The Swift bootstrap first looks for these scripts in the app bundle under `local_speech/`, then falls back to the source-tree path for development.
 
-### Optional Cloudflare Worker
-
-The Worker remains for legacy/fallback cloud routes:
-
-- `POST /chat` proxies to Anthropic Messages API
-- `POST /transcribe-token` fetches an AssemblyAI streaming token
-
-If you use those routes:
-
-```bash
-cd worker
-npm install
-npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler secret put ASSEMBLYAI_API_KEY
-npx wrangler deploy
-```
-
-The default app path on this branch does not require those cloud keys.
-
 ## Permissions the app needs
 
 - **Microphone** — push-to-talk voice capture
@@ -89,13 +70,10 @@ leanring-buddy/                 # Swift source; typo stays
   LocalWhisperTranscriptionProvider.swift
   LocalTTSClient.swift          # Local Kokoro playback client
   OverlayWindow.swift           # Blue cursor overlay
-  AssemblyAI*.swift             # Optional legacy/fallback transcription provider
   BuddyDictation*.swift         # Push-to-talk pipeline
 local_speech/
   stt_server.py                 # Local Whisper MLX HTTP server
   tts_server.py                 # Local Kokoro HTTP server
-worker/
-  src/index.ts                  # Legacy/fallback Cloudflare routes
 CLAUDE.md                       # Symlink to AGENTS.md
 ```
 

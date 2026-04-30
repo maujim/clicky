@@ -30,50 +30,7 @@ protocol BuddyTranscriptionProvider {
 }
 
 enum BuddyTranscriptionProviderFactory {
-    private enum PreferredProvider: String {
-        case assemblyAI = "assemblyai"
-        case localWhisper = "local-whisper"
-        case appleSpeech = "apple"
-    }
-
     static func makeDefaultProvider() -> any BuddyTranscriptionProvider {
-        let provider = resolveProvider()
-        print("🎙️ Transcription: using \(provider.displayName)")
-        return provider
-    }
-
-    private static func resolveProvider() -> any BuddyTranscriptionProvider {
-        let preferredProviderRawValue = AppBundleConfiguration
-            .stringValue(forKey: "VoiceTranscriptionProvider")?
-            .lowercased()
-        let preferredProvider = preferredProviderRawValue.flatMap(PreferredProvider.init(rawValue:))
-
-        let assemblyAIProvider = AssemblyAIStreamingTranscriptionProvider()
-        let localWhisperProvider = LocalWhisperTranscriptionProvider()
-
-        if preferredProvider == .appleSpeech {
-            return AppleSpeechTranscriptionProvider()
-        }
-
-        if preferredProvider == .assemblyAI {
-            if assemblyAIProvider.isConfigured {
-                return assemblyAIProvider
-            }
-
-            print("⚠️ Transcription: AssemblyAI preferred but not configured, falling back")
-
-            print("⚠️ Transcription: using local Whisper MLX as fallback")
-            return localWhisperProvider
-        }
-
-        if preferredProvider == .localWhisper {
-            return localWhisperProvider
-        }
-
-        if assemblyAIProvider.isConfigured {
-            return assemblyAIProvider
-        }
-
-        return localWhisperProvider
+        return LocalWhisperTranscriptionProvider()
     }
 }

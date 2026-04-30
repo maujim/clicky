@@ -7,7 +7,7 @@
 
 macOS menu bar companion app. Lives entirely in the macOS status bar (no dock icon, no main window). Clicking the menu bar icon opens a custom floating panel with companion voice controls. Uses push-to-talk (ctrl+option) to capture voice input, transcribes it with local Whisper MLX, and sends the transcript + screenshots to a local OpenAI-compatible vision model. The app streams text back into the cursor overlay and speaks it with local Kokoro TTS. A blue cursor overlay can fly to and point at UI elements the vision model references on any connected monitor.
 
-The default runtime is local-first. The Cloudflare Worker remains for legacy/fallback Claude and AssemblyAI routes, but local vision, local STT, and local TTS are the primary path.
+The runtime is fully local — local vision, local STT (Whisper MLX), and local TTS (Kokoro). No cloud dependencies.
 
 ## Architecture
 
@@ -15,24 +15,13 @@ The default runtime is local-first. The Cloudflare Worker remains for legacy/fal
 - **Framework**: SwiftUI (macOS native) with AppKit bridging for menu bar panel and cursor overlay
 - **Pattern**: MVVM with `@StateObject` / `@Published` state management
 - **AI Chat**: Local OpenAI-compatible vision endpoint (`127.0.0.1:8080/v1/chat/completions`) using Liquid VL model IDs by default
-- **Speech-to-Text**: Local Whisper MLX (`mlx-community/whisper-base-mlx-fp32`) via a long-lived Python HTTP server (`stt_server.py` on `127.0.0.1:8765`), with AssemblyAI streaming and Apple Speech still present as alternate providers
+- **Speech-to-Text**: Local Whisper MLX (`mlx-community/whisper-base-mlx-fp32`) via a long-lived Python HTTP server (`stt_server.py` on `127.0.0.1:8765`), with Apple Speech as fallback
 - **Text-to-Speech**: Local Kokoro (`mlx-community/Kokoro-82M-4bit`) via a long-lived Python HTTP server (`tts_server.py` on `127.0.0.1:8766`)
 - **Screen Capture**: ScreenCaptureKit (macOS 14.2+), multi-monitor support
 - **Voice Input**: Push-to-talk via `AVAudioEngine` + pluggable transcription-provider layer. System-wide keyboard shortcut via listen-only CGEvent tap.
 - **Element Pointing**: The vision model embeds `[POINT:x,y:label:screenN]` tags in responses. The overlay parses these, maps coordinates to the correct monitor, and animates the blue cursor along a bezier arc to the target.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
 - **Analytics**: PostHog via `ClickyAnalytics.swift`
-
-### API Proxy (Cloudflare Worker)
-
-The current default app path is local-first and does not need cloud API keys for vision, STT, or TTS. The Cloudflare Worker (`worker/src/index.ts`) remains in the repo for legacy/fallback cloud routes.
-
-| Route | Upstream | Purpose |
-|-------|----------|---------|
-| `POST /chat` | `api.anthropic.com/v1/messages` | Legacy/fallback Claude vision + streaming chat |
-| `POST /transcribe-token` | `streaming.assemblyai.com/v3/token` | Optional AssemblyAI websocket token for the AssemblyAI transcription provider |
-
-Worker secrets if using fallback cloud routes: `ANTHROPIC_API_KEY`, `ASSEMBLYAI_API_KEY`
 
 ### Key Architecture Decisions
 
@@ -56,8 +45,7 @@ Worker secrets if using fallback cloud routes: `ANTHROPIC_API_KEY`, `ASSEMBLYAI_
 | `CompanionResponseOverlay.swift` | ~217 | SwiftUI view for the response text bubble and waveform displayed next to the cursor in the overlay. |
 | `CompanionScreenCaptureUtility.swift` | ~132 | Multi-monitor screenshot capture using ScreenCaptureKit. Returns labeled image data for each connected display. |
 | `BuddyDictationManager.swift` | ~866 | Push-to-talk voice pipeline. Handles microphone capture via `AVAudioEngine`, provider-aware permission checks, keyboard/button dictation sessions, transcript finalization, shortcut parsing, contextual keyterms, and live audio-level reporting for waveform feedback. |
-| `BuddyTranscriptionProvider.swift` | ~100 | Protocol surface and provider factory for voice transcription backends. Resolves provider based on `VoiceTranscriptionProvider` in Info.plist — AssemblyAI, local Whisper MLX, or Apple Speech. |
-| `AssemblyAIStreamingTranscriptionProvider.swift` | ~478 | Streaming transcription provider. Fetches temp tokens from the Cloudflare Worker, opens an AssemblyAI v3 websocket, streams PCM16 audio, tracks turn-based transcripts, and delivers finalized text on key-up. Shares a single URLSession across all sessions. |
+| `BuddyTranscriptionProvider.swift` | ~31 | Protocol surface and provider factory for voice transcription backends. Uses local Whisper MLX by default. |
 | `LocalWhisperTranscriptionProvider.swift` | ~215 | Local Whisper MLX transcription provider. Buffers push-to-talk audio locally, sends as WAV to the local STT server (`stt_server.py`), returns transcribed text. |
 | `AppleSpeechTranscriptionProvider.swift` | ~147 | Local fallback transcription provider backed by Apple's Speech framework. |
 | `BuddyAudioConversionSupport.swift` | ~108 | Audio conversion helpers. Converts live mic buffers to PCM16 mono audio and builds WAV payloads for upload-based providers. |
@@ -70,7 +58,7 @@ Worker secrets if using fallback cloud routes: `ANTHROPIC_API_KEY`, `ASSEMBLYAI_
 | `ClickyAnalytics.swift` | ~121 | PostHog analytics integration for usage tracking. |
 | `WindowPositionManager.swift` | ~262 | Window placement logic, Screen Recording permission flow, and accessibility permission helpers. |
 | `AppBundleConfiguration.swift` | ~231 | Runtime configuration reader plus local STT/TTS process bootstrap, script resolution, healthchecks, and uv environment setup. |
-| `worker/src/index.ts` | ~120 | Legacy/fallback Cloudflare Worker proxy. Routes: `/chat` (Claude), `/transcribe-token` (AssemblyAI temp token). |
+
 
 ## Build & Run
 
@@ -85,23 +73,6 @@ open leanring-buddy.xcodeproj
 ```
 
 **Do NOT run `xcodebuild` from the terminal** — it invalidates TCC (Transparency, Consent, and Control) permissions and the app will need to re-request screen recording, accessibility, etc.
-
-## Cloudflare Worker
-
-```bash
-cd worker
-npm install
-
-# Add secrets
-npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler secret put ASSEMBLYAI_API_KEY
-
-# Deploy
-npx wrangler deploy
-
-# Local dev (create worker/.dev.vars with your keys)
-npx wrangler dev
-```
 
 ## Code Style & Conventions
 
