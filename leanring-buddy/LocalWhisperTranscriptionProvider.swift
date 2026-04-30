@@ -152,6 +152,22 @@ private final class LocalWhisperTranscriptionSession: BuddyStreamingTranscriptio
     }
 
     private func transcribeWithLocalWhisper(wavAudioData: Data) async throws -> String {
+        do {
+            return try await sendTranscriptionRequest(wavAudioData: wavAudioData)
+        } catch {
+            guard shouldRestartSTTServerAfterTranscriptionError(error) else {
+                throw error
+            }
+
+            print("[Whisper MLX] restarting local STT server after transient failure: \(error.localizedDescription)")
+            try await LocalSpeechServiceBootstrap.shared.restartSTTServer(
+                whisperModelName: localWhisperModelName
+            )
+            return try await sendTranscriptionRequest(wavAudioData: wavAudioData)
+        }
+    }
+
+    private func sendTranscriptionRequest(wavAudioData: Data) async throws -> String {
         try await LocalSpeechServiceBootstrap.shared.ensureSTTServerRunning(
             whisperModelName: localWhisperModelName
         )
@@ -190,6 +206,14 @@ private final class LocalWhisperTranscriptionSession: BuddyStreamingTranscriptio
         }
 
         throw LocalWhisperTranscriptionProviderError(message: "Local STT server response missing transcript text")
+    }
+
+    private func shouldRestartSTTServerAfterTranscriptionError(_ error: Error) -> Bool {
+        let errorText = error.localizedDescription.lowercased()
+        return errorText.contains("broken pipe")
+            || errorText.contains("connection lost")
+            || errorText.contains("could not connect")
+            || errorText.contains("network connection was lost")
     }
 
     private func deliverFinalTranscript(_ transcriptText: String) {

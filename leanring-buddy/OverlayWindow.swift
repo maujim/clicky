@@ -33,8 +33,10 @@ class OverlayWindow: NSWindow {
         // Important: Allow the window to appear even when app is not active
         self.hidesOnDeactivate = false
 
-        // Cover the entire screen
-        self.setFrame(screen.frame, display: true)
+        // Cover the entire screen without forcing an immediate display pass.
+        // Forcing display while rebuilding screen-saver-level transparent windows
+        // can produce visible flashes on some multi-monitor setups.
+        self.setFrame(screen.frame, display: false)
 
         // Make sure it's on the right screen
         if let screenForWindow = NSScreen.screens.first(where: { $0.frame == screen.frame }) {
@@ -781,7 +783,17 @@ class OverlayWindowManager {
     var hasShownOverlayBefore = false
 
     func showOverlay(onScreens screens: [NSScreen], companionManager: CompanionManager) {
-        // Hide any existing overlays
+        if overlayWindowsMatch(screens: screens) {
+            for window in overlayWindows where !window.isVisible {
+                window.alphaValue = 1
+                window.orderFrontRegardless()
+            }
+            return
+        }
+
+        // Hide any existing overlays only when the display layout actually changed.
+        // Recreating screen-saver-level transparent windows for repeated show calls
+        // can cause a brief full-screen flicker.
         hideOverlay()
 
         // Track if this is the first time showing overlay (welcome message)
@@ -803,7 +815,17 @@ class OverlayWindowManager {
             window.contentView = hostingView
 
             overlayWindows.append(window)
+            window.alphaValue = 1
             window.orderFrontRegardless()
+        }
+    }
+
+    private func overlayWindowsMatch(screens: [NSScreen]) -> Bool {
+        guard overlayWindows.count == screens.count else { return false }
+
+        let existingWindowFrames = overlayWindows.map(\.frame)
+        return screens.allSatisfy { screen in
+            existingWindowFrames.contains(screen.frame)
         }
     }
 

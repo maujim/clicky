@@ -163,13 +163,28 @@ final class CompanionManager: ObservableObject {
 
         Task {
             do {
-                try await LocalSpeechServiceBootstrap.shared.ensureServersRunning(
-                    whisperModelName: AppBundleConfiguration.stringValue(forKey: "LocalWhisperModel") ?? "mlx-community/whisper-base-mlx-fp32",
-                    ttsModelName: AppBundleConfiguration.stringValue(forKey: "LocalTTSModel") ?? "mlx-community/Kokoro-82M-4bit",
-                    ttsVoiceName: AppBundleConfiguration.stringValue(forKey: "LocalTTSVoice") ?? "af_heart",
-                    ttsLanguageCode: AppBundleConfiguration.stringValue(forKey: "LocalTTSLanguageCode") ?? "a"
-                )
-                print("✅ Local speech servers ready")
+                let configuredVoiceTranscriptionProvider = AppBundleConfiguration.stringValue(forKey: "VoiceTranscriptionProvider")
+                    ?? "local-whisper"
+                let configuredTTSModelName = AppBundleConfiguration.stringValue(forKey: "LocalTTSModel") ?? "mlx-community/Kokoro-82M-4bit"
+                let configuredTTSVoiceName = AppBundleConfiguration.stringValue(forKey: "LocalTTSVoice") ?? "af_heart"
+                let configuredTTSLanguageCode = AppBundleConfiguration.stringValue(forKey: "LocalTTSLanguageCode") ?? "a"
+
+                if configuredVoiceTranscriptionProvider == "apple-speech" {
+                    try await LocalSpeechServiceBootstrap.shared.ensureTTSServerRunning(
+                        ttsModelName: configuredTTSModelName,
+                        ttsVoiceName: configuredTTSVoiceName,
+                        ttsLanguageCode: configuredTTSLanguageCode
+                    )
+                    print("✅ Local TTS server ready")
+                } else {
+                    try await LocalSpeechServiceBootstrap.shared.ensureServersRunning(
+                        whisperModelName: AppBundleConfiguration.stringValue(forKey: "LocalWhisperModel") ?? "mlx-community/whisper-base-mlx-fp32",
+                        ttsModelName: configuredTTSModelName,
+                        ttsVoiceName: configuredTTSVoiceName,
+                        ttsLanguageCode: configuredTTSLanguageCode
+                    )
+                    print("✅ Local speech servers ready")
+                }
             } catch {
                 print("⚠️ Local speech server startup failed: \(error.localizedDescription)")
             }

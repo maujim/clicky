@@ -1,4 +1,5 @@
 import base64
+import contextlib
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,11 +14,17 @@ MODEL = os.environ.get("CLICKY_STT_MODEL", "mlx-community/whisper-base-mlx-fp32"
 class STTHandler(BaseHTTPRequestHandler):
     def _send_json(self, status_code: int, payload: dict):
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except BrokenPipeError:
+            # The macOS app may cancel a request if the user starts/stops quickly.
+            # Treat that as a disconnected client instead of recursively trying to
+            # send an error response and making the next request look unhealthy.
+            return
 
     def do_GET(self):
         if self.path == "/health":
@@ -46,11 +53,18 @@ class STTHandler(BaseHTTPRequestHandler):
                 audio_file.write(audio_data)
 
             try:
-                result = mlx_whisper.transcribe(
-                    temp_wav_path,
-                    path_or_hf_repo=MODEL,
-                    fp16=False,
-                )
+                # mlx-whisper/progress helpers can write to stderr while the model
+                # runs. When the app is launched from Xcode those inherited pipes
+                # can occasionally disappear or fill, causing transcribe() itself
+                # to raise BrokenPipeError even though audio transcription worked.
+                with open(os.devnull, "w") as devnull, \
+                    contextlib.redirect_stdout(devnull), \
+                    contextlib.redirect_stderr(devnull):
+                    result = mlx_whisper.transcribe(
+                        temp_wav_path,
+                        path_or_hf_repo=MODEL,
+                        fp16=False,
+                    )
                 transcript_text = (result.get("text") or "").strip()
                 self._send_json(200, {"ok": True, "text": transcript_text})
             finally:
@@ -59,6 +73,8 @@ class STTHandler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
 
+        except BrokenPipeError:
+            return
         except Exception as error:
             self._send_json(500, {"ok": False, "error": str(error)})
 

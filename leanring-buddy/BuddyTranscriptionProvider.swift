@@ -31,6 +31,13 @@ protocol BuddyTranscriptionProvider {
 
 enum BuddyTranscriptionProviderFactory {
     static func makeDefaultProvider() -> any BuddyTranscriptionProvider {
+        let configuredProviderName = AppBundleConfiguration.stringValue(forKey: "VoiceTranscriptionProvider")
+            ?? "local-whisper"
+
+        if configuredProviderName == "apple-speech" {
+            return AppleSpeechTranscriptionProvider()
+        }
+
         return LocalWhisperTranscriptionProvider()
     }
 }

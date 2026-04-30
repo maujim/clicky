@@ -97,6 +97,9 @@ final class LocalSpeechServiceBootstrap {
             return
         }
 
+        terminateStaleLocalSpeechServerProcesses(scriptFileName: "stt_server.py")
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
         try launchSTTServer(whisperModelName: whisperModelName)
 
         let sttHealthy = await waitForHealthcheck(urlString: "http://127.0.0.1:8765/health")
@@ -114,6 +117,9 @@ final class LocalSpeechServiceBootstrap {
             return
         }
 
+        terminateStaleLocalSpeechServerProcesses(scriptFileName: "tts_server.py")
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
         try launchTTSServer(
             ttsModelName: ttsModelName,
             ttsVoiceName: ttsVoiceName,
@@ -127,15 +133,47 @@ final class LocalSpeechServiceBootstrap {
     }
 
     func stopServers() {
-        if let sttServerProcess, sttServerProcess.isRunning {
-            sttServerProcess.terminate()
-        }
+        stopSTTServer()
         if let ttsServerProcess, ttsServerProcess.isRunning {
             ttsServerProcess.terminate()
         }
-        sttServerProcess = nil
         ttsServerProcess = nil
         didAttemptStartup = false
+    }
+
+    func restartSTTServer(whisperModelName: String) async throws {
+        stopSTTServer()
+        terminateStaleLocalSpeechServerProcesses(scriptFileName: "stt_server.py")
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        try launchSTTServer(whisperModelName: whisperModelName)
+
+        let sttHealthy = await waitForHealthcheck(urlString: "http://127.0.0.1:8765/health")
+        guard sttHealthy else {
+            throw LocalSpeechServiceBootstrapError.serverDidNotBecomeHealthy(serviceName: "stt")
+        }
+    }
+
+    private func stopSTTServer() {
+        if let sttServerProcess, sttServerProcess.isRunning {
+            sttServerProcess.terminate()
+        }
+        sttServerProcess = nil
+    }
+
+    private func terminateStaleLocalSpeechServerProcesses(scriptFileName: String) {
+        let pkillProcess = Process()
+        pkillProcess.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkillProcess.arguments = ["-f", "local_speech/\(scriptFileName)"]
+        pkillProcess.standardOutput = FileHandle.nullDevice
+        pkillProcess.standardError = FileHandle.nullDevice
+
+        do {
+            try pkillProcess.run()
+            pkillProcess.waitUntilExit()
+        } catch {
+            // If pkill is unavailable or finds nothing, launching below will still
+            // surface a healthcheck failure if the port is actually blocked.
+        }
     }
 
     private func launchSTTServer(whisperModelName: String) throws {
@@ -157,9 +195,11 @@ final class LocalSpeechServiceBootstrap {
         processEnvironment["CLICKY_STT_PORT"] = "8765"
         sttProcess.environment = processEnvironment
 
-        let outputPipe = Pipe()
-        sttProcess.standardOutput = outputPipe
-        sttProcess.standardError = outputPipe
+        // The speech servers can emit model/runtime logs while processing audio.
+        // If nobody drains a Pipe, the subprocess can eventually fail writes with
+        // Broken pipe, which surfaces as intermittent transcription failures.
+        sttProcess.standardOutput = FileHandle.nullDevice
+        sttProcess.standardError = FileHandle.nullDevice
 
         try sttProcess.run()
         sttServerProcess = sttProcess
@@ -192,9 +232,9 @@ final class LocalSpeechServiceBootstrap {
         processEnvironment["CLICKY_TTS_PORT"] = "8766"
         ttsProcess.environment = processEnvironment
 
-        let outputPipe = Pipe()
-        ttsProcess.standardOutput = outputPipe
-        ttsProcess.standardError = outputPipe
+        // Keep subprocess logging from filling an undrained Pipe during long runs.
+        ttsProcess.standardOutput = FileHandle.nullDevice
+        ttsProcess.standardError = FileHandle.nullDevice
 
         try ttsProcess.run()
         ttsServerProcess = ttsProcess
