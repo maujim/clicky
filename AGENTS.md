@@ -50,7 +50,7 @@ The runtime is fully local — local vision, local STT (Whisper MLX), and local 
 | `AppleSpeechTranscriptionProvider.swift` | ~147 | Local fallback transcription provider backed by Apple's Speech framework. |
 | `BuddyAudioConversionSupport.swift` | ~108 | Audio conversion helpers. Converts live mic buffers to PCM16 mono audio and builds WAV payloads for upload-based providers. |
 | `GlobalPushToTalkShortcutMonitor.swift` | ~132 | System-wide push-to-talk monitor. Owns the listen-only `CGEvent` tap and publishes press/release transitions. |
-| `ClaudeAPI.swift` | ~291 | Misnamed local OpenAI-compatible vision chat client with streaming and non-streaming modes. Should be renamed to `VisionChatClient.swift` in a project-file-aware cleanup. |
+| `VLMClient.swift` | ~291 | Local OpenAI-compatible vision chat client with streaming and non-streaming modes. |
 | ~~`OpenAIAPI.swift`~~ | — | Removed. Dead code from when the app used OpenAI directly. |
 | `LocalTTSClient.swift` | ~94 | Local TTS client. Sends text to the local Kokoro TTS server (`tts_server.py` on `127.0.0.1:8766`), plays back audio via `AVAudioPlayer`. Exposes `isPlaying` for transient cursor scheduling. |
 | `ElementLocationDetector.swift` | ~335 | Detects UI element locations in screenshots for cursor pointing. |

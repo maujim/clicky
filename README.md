@@ -66,7 +66,7 @@ The vision model can embed `[POINT:x,y:label:screenN]` tags in responses. Clicky
 leanring-buddy/                 # Swift source; typo stays
   CompanionManager.swift        # Central state machine
   CompanionPanelView.swift      # Menu bar panel UI
-  ClaudeAPI.swift               # Misnamed local OpenAI-compatible vision client
+  VLMClient.swift                # Local OpenAI-compatible vision client
   LocalWhisperTranscriptionProvider.swift
   LocalTTSClient.swift          # Local Kokoro playback client
   OverlayWindow.swift           # Blue cursor overlay
@@ -79,7 +79,7 @@ CLAUDE.md                       # Symlink to AGENTS.md
 
 ## Known cleanup work
 
-- `ClaudeAPI.swift` should be renamed to a neutral vision-client name in a project-file-aware cleanup.
+- `VLMClient.swift` is the local OpenAI-compatible vision client.
 - Local vision server startup/healthcheck/recovery needs to be made explicit.
 - `tts_server.py` still shells out for synthesis per request; keeping Kokoro warm in-process may reduce latency.
 

@@ -1,5 +1,5 @@
 //
-//  ClaudeAPI.swift
+//  VLMClient.swift
 //  OpenAI-compatible local vision chat client with streaming support.
 //
 
@@ -7,7 +7,7 @@ import Foundation
 
 /// Vision API helper with streaming for progressive text display.
 /// Sends OpenAI-compatible chat-completions requests to the configured endpoint.
-class ClaudeAPI { // TODO: Rename to VisionChatClient in a project-file-aware cleanup pass.
+class VLMClient {
     private let apiURL: URL
     private let apiKey: String?
     var model: String
@@ -113,7 +113,7 @@ class ClaudeAPI { // TODO: Rename to VisionChatClient in a project-file-aware cl
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NSError(
-                domain: "ClaudeAPI",
+                domain: "VLMClient",
                 code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Invalid HTTP response"]
             )
@@ -126,7 +126,7 @@ class ClaudeAPI { // TODO: Rename to VisionChatClient in a project-file-aware cl
             }
             let errorBody = errorBodyChunks.joined(separator: "\n")
             throw NSError(
-                domain: "ClaudeAPI",
+                domain: "VLMClient",
                 code: httpResponse.statusCode,
                 userInfo: [NSLocalizedDescriptionKey: "API Error (\(httpResponse.statusCode)): \(errorBody)"]
             )
@@ -222,7 +222,7 @@ class ClaudeAPI { // TODO: Rename to VisionChatClient in a project-file-aware cl
               (200...299).contains(httpResponse.statusCode) else {
             let responseString = String(data: data, encoding: .utf8) ?? "Unknown error"
             throw NSError(
-                domain: "ClaudeAPI",
+                domain: "VLMClient",
                 code: (response as? HTTPURLResponse)?.statusCode ?? -1,
                 userInfo: [NSLocalizedDescriptionKey: "API Error: \(responseString)"]
             )
@@ -235,7 +235,7 @@ class ClaudeAPI { // TODO: Rename to VisionChatClient in a project-file-aware cl
               let message = firstChoice["message"] as? [String: Any],
               let text = message["content"] as? String else {
             throw NSError(
-                domain: "ClaudeAPI",
+                domain: "VLMClient",
                 code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Invalid response format"]
             )

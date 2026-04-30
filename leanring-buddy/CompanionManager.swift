@@ -73,8 +73,8 @@ final class CompanionManager: ObservableObject {
     /// Example: `http://127.0.0.1:8080/v1/chat/completions`
     private static let localVisionChatCompletionsURL = "http://127.0.0.1:8080/v1/chat/completions"
 
-    private lazy var visionChatClient: ClaudeAPI = {
-        return ClaudeAPI(
+    private lazy var visionChatClient: VLMClient = {
+        return VLMClient(
             proxyURL: Self.localVisionChatCompletionsURL,
             model: selectedModel,
             apiKey: AppBundleConfiguration.stringValue(forKey: "LocalVisionAPIKey")
