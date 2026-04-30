@@ -112,10 +112,5 @@ enum ClickyAnalytics {
         ])
     }
 
-    /// An error occurred during TTS playback.
-    static func trackTTSError(error: String) {
-        PostHogSDK.shared.capture("tts_error", properties: [
-            "error": error
-        ])
-    }
+
 }

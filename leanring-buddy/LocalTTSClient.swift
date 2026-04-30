@@ -1,5 +1,5 @@
 //
-//  ElevenLabsTTSClient.swift
+//  LocalTTSClient.swift
 //  leanring-buddy
 //
 //  Local TTS client backed by mlx-audio (Kokoro) through uv.
@@ -9,8 +9,7 @@ import AVFoundation
 import Foundation
 
 @MainActor
-final class ElevenLabsTTSClient {
-    private let proxyURL: URL
+final class LocalTTSClient {
     private let session: URLSession
 
     private let localKokoroModelName = AppBundleConfiguration.stringValue(forKey: "LocalTTSModel")
@@ -24,9 +23,7 @@ final class ElevenLabsTTSClient {
     /// audio finishes playing even if the caller doesn't hold a reference.
     private var audioPlayer: AVAudioPlayer?
 
-    init(proxyURL: String) {
-        self.proxyURL = URL(string: proxyURL)!
-
+    init() {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 60
