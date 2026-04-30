@@ -219,7 +219,7 @@ final class LocalSpeechServiceBootstrap {
         ttsProcess.arguments = [
             "run",
             "--with", "mlx-audio",
-            "--with", "misaki",
+            "--with", "misaki[en]",
             "--with", "soundfile",
             "python", ttsScriptURL.path
         ]

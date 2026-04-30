@@ -111,7 +111,7 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var isOverlayVisible: Bool = false
 
     /// The local VLM model used for voice responses. Persisted to UserDefaults.
-    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedVisionModel") ?? UserDefaults.standard.string(forKey: "selectedClaudeModel") ?? "LiquidAI/LFM2.5-VL-1.6B-GGUF"
+    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedVisionModel") ?? UserDefaults.standard.string(forKey: "selectedClaudeModel") ?? "LiquidAI/LFM2.5-VL-450M-GGUF"
 
     func setSelectedModel(_ model: String) {
         selectedModel = model
@@ -151,6 +151,10 @@ final class CompanionManager: ObservableObject {
 
 
     func start() {
+        if selectedModel == "LiquidAI/LFM2.5-VL-1.6B-GGUF" {
+            setSelectedModel("LiquidAI/LFM2.5-VL-450M-GGUF")
+        }
+
         refreshAllPermissions()
         print("🔑 Clicky start — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission), onboarded: \(hasCompletedOnboarding)")
         startPermissionPolling()

@@ -10,7 +10,7 @@ import io
 import json
 import os
 import traceback
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import numpy as np
 
@@ -27,6 +27,7 @@ LANGUAGE_CODE = os.environ.get("CLICKY_TTS_LANGUAGE_CODE", "a")
 # this will fetch ~57 files from HuggingFace; subsequent restarts use the
 # local HF cache.
 _tts_model = None  # type: ignore
+_tts_startup_error = None
 
 
 def _ensure_model():
@@ -58,14 +59,16 @@ class TTSHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             model_status = "warm" if _tts_model is not None else "cold"
+            is_ready = _tts_model is not None and _tts_startup_error is None
             self._send_json(
-                200,
+                200 if is_ready else 503,
                 {
-                    "ok": True,
+                    "ok": is_ready,
                     "model": MODEL,
                     "voice": VOICE,
                     "languageCode": LANGUAGE_CODE,
                     "modelStatus": model_status,
+                    "error": str(_tts_startup_error) if _tts_startup_error else None,
                 },
             )
             return
@@ -128,8 +131,8 @@ class TTSHandler(BaseHTTPRequestHandler):
                     "ok": False,
                     "error": (
                         f"Missing dependency: {error}. "
-                        "Ensure mlx-audio and misaki are installed "
-                        "(uv run --with mlx-audio --with misaki --with soundfile …)."
+                        "Ensure mlx-audio and misaki[en] are installed "
+                        "(uv run --with mlx-audio --with 'misaki[en]' --with soundfile …)."
                     ),
                 },
             )
@@ -145,14 +148,20 @@ class TTSHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    server = ThreadingHTTPServer((HOST, PORT), TTSHandler)
+    # MLX GPU streams are thread-local. A threaded HTTP server can load the
+    # model on the main thread and then synthesize on a worker thread, causing
+    # `There is no Stream(gpu, 0) in current thread.` Keep all Kokoro calls on
+    # the single server thread instead.
+    server = HTTPServer((HOST, PORT), TTSHandler)
     print(f"[clicky-tts] listening on http://{HOST}:{PORT}")
 
     # Pre-warm the model eagerly (can take several seconds on first boot
     # but guarantees zero cold-start penalty for the first request).
+    global _tts_startup_error
     try:
         _ensure_model()
     except Exception as exc:
+        _tts_startup_error = exc
         print(f"[clicky-tts] WARNING: model pre-warm failed ({exc}). "
               "The server will still accept requests and retry loading on demand.")
 

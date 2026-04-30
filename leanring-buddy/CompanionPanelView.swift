@@ -558,8 +558,8 @@ struct CompanionPanelView: View {
             Spacer()
 
             HStack(spacing: 0) {
-                modelOptionButton(label: "Liquid VL 1.6B", modelID: "LiquidAI/LFM2.5-VL-1.6B-GGUF")
                 modelOptionButton(label: "Liquid VL 450M", modelID: "LiquidAI/LFM2.5-VL-450M-GGUF")
+                modelOptionButton(label: "Liquid VL 1.6B", modelID: "LiquidAI/LFM2.5-VL-1.6B-GGUF")
             }
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
