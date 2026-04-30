@@ -185,6 +185,10 @@ final class LocalSpeechServiceBootstrap {
     private func waitForHealthcheck(urlString: String) async -> Bool {
         guard let url = URL(string: urlString) else { return false }
 
+        // Give the subprocess time to import libraries and bind before first attempt.
+        // Avoids noisy Connection refused console spam during initial startup.
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+
         for _ in 0..<30 {
             do {
                 let (_, response) = try await URLSession.shared.data(from: url)
