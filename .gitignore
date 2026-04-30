@@ -4,5 +4,6 @@ worker/.dev.vars
 *.xcuserstate
 build/
 releases/
+.env
 .claude/
 coding-plans/
