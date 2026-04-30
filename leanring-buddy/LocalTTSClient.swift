@@ -57,6 +57,8 @@ final class LocalTTSClient {
         request.timeoutInterval = 120
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
 
+        print("🔊 Local Kokoro TTS will speak: \(normalizedText)")
+
         let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
