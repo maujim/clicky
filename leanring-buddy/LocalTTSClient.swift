@@ -37,8 +37,7 @@ final class LocalTTSClient {
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedText.isEmpty else { return }
 
-        try await LocalSpeechServiceBootstrap.shared.ensureServersRunning(
-            whisperModelName: AppBundleConfiguration.stringValue(forKey: "LocalWhisperModel") ?? "mlx-community/whisper-base-mlx-fp32",
+        try await LocalSpeechServiceBootstrap.shared.ensureTTSServerRunning(
             ttsModelName: localKokoroModelName,
             ttsVoiceName: localKokoroVoiceName,
             ttsLanguageCode: localKokoroLanguageCode

@@ -1,14 +1,13 @@
 //
 //  ClaudeAPI.swift
-//  Vision API implementation with streaming support for Claude via the Cloudflare proxy.
+//  OpenAI-compatible local vision chat client with streaming support.
 //
 
 import Foundation
 
 /// Vision API helper with streaming for progressive text display.
-/// Sends chat completions requests to the Cloudflare Worker proxy,
-/// which forwards them to Claude.
-class ClaudeAPI {
+/// Sends OpenAI-compatible chat-completions requests to the configured endpoint.
+class ClaudeAPI { // TODO: Rename to VisionChatClient in a project-file-aware cleanup pass.
     private let apiURL: URL
     private let apiKey: String?
     var model: String

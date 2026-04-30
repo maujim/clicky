@@ -41,22 +41,30 @@ enum AppBundleConfiguration {
     }
 
     static func localSpeechScriptURL(scriptFileName: String) -> URL? {
-        // During development, #filePath points at the source file in the repo.
-        // We derive the project root from this file so helper Python scripts
-        // can be launched without adding them to the app bundle.
+        if let bundledScriptURL = Bundle.main.url(
+            forResource: (scriptFileName as NSString).deletingPathExtension,
+            withExtension: (scriptFileName as NSString).pathExtension,
+            subdirectory: "local_speech"
+        ), FileManager.default.fileExists(atPath: bundledScriptURL.path) {
+            return bundledScriptURL
+        }
+
+        // Development fallback: #filePath points at the source file in the repo.
+        // This keeps local iteration working before the helper scripts are added
+        // to the app bundle's Copy Bundle Resources phase.
         let sourceFileURL = URL(fileURLWithPath: #filePath)
         let projectRootURL = sourceFileURL
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let scriptURL = projectRootURL
+        let developmentScriptURL = projectRootURL
             .appendingPathComponent("local_speech", isDirectory: true)
             .appendingPathComponent(scriptFileName)
 
-        guard FileManager.default.fileExists(atPath: scriptURL.path) else {
+        guard FileManager.default.fileExists(atPath: developmentScriptURL.path) else {
             return nil
         }
 
-        return scriptURL
+        return developmentScriptURL
     }
 }
 
@@ -75,28 +83,42 @@ final class LocalSpeechServiceBootstrap {
         ttsVoiceName: String,
         ttsLanguageCode: String
     ) async throws {
-        if didAttemptStartup, areBothServersRunning {
+        try await ensureSTTServerRunning(whisperModelName: whisperModelName)
+        try await ensureTTSServerRunning(
+            ttsModelName: ttsModelName,
+            ttsVoiceName: ttsVoiceName,
+            ttsLanguageCode: ttsLanguageCode
+        )
+        didAttemptStartup = true
+    }
+
+    func ensureSTTServerRunning(whisperModelName: String) async throws {
+        if sttServerProcess?.isRunning == true {
             return
         }
 
-        didAttemptStartup = true
-
-        if sttServerProcess == nil || sttServerProcess?.isRunning == false {
-            try launchSTTServer(whisperModelName: whisperModelName)
-        }
-
-        if ttsServerProcess == nil || ttsServerProcess?.isRunning == false {
-            try launchTTSServer(
-                ttsModelName: ttsModelName,
-                ttsVoiceName: ttsVoiceName,
-                ttsLanguageCode: ttsLanguageCode
-            )
-        }
+        try launchSTTServer(whisperModelName: whisperModelName)
 
         let sttHealthy = await waitForHealthcheck(urlString: "http://127.0.0.1:8765/health")
         guard sttHealthy else {
             throw LocalSpeechServiceBootstrapError.serverDidNotBecomeHealthy(serviceName: "stt")
         }
+    }
+
+    func ensureTTSServerRunning(
+        ttsModelName: String,
+        ttsVoiceName: String,
+        ttsLanguageCode: String
+    ) async throws {
+        if ttsServerProcess?.isRunning == true {
+            return
+        }
+
+        try launchTTSServer(
+            ttsModelName: ttsModelName,
+            ttsVoiceName: ttsVoiceName,
+            ttsLanguageCode: ttsLanguageCode
+        )
 
         let ttsHealthy = await waitForHealthcheck(urlString: "http://127.0.0.1:8766/health")
         guard ttsHealthy else {
@@ -114,10 +136,6 @@ final class LocalSpeechServiceBootstrap {
         sttServerProcess = nil
         ttsServerProcess = nil
         didAttemptStartup = false
-    }
-
-    private var areBothServersRunning: Bool {
-        (sttServerProcess?.isRunning ?? false) && (ttsServerProcess?.isRunning ?? false)
     }
 
     private func launchSTTServer(whisperModelName: String) throws {
@@ -207,10 +225,15 @@ final class LocalSpeechServiceBootstrap {
     }
 
     private func resolveLocalUVExecutablePath() -> String {
+        let homeDirectoryUVExecutablePath = FileManager.default
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin/uv")
+            .path
+
         let knownUVExecutablePaths = [
             "/opt/homebrew/bin/uv",
             "/usr/local/bin/uv",
-            "/Users/mukund/.local/bin/uv"
+            homeDirectoryUVExecutablePath
         ]
 
         if let firstExistingPath = knownUVExecutablePaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {

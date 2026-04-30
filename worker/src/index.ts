@@ -1,12 +1,13 @@
 /**
  * Clicky Proxy Worker
  *
- * Proxies requests to Claude and AssemblyAI APIs so the app never
- * ships with raw API keys. Keys are stored as Cloudflare secrets.
+ * Legacy/fallback proxy for Claude and AssemblyAI APIs. The default app path
+ * on the local-model branch uses local vision, local Whisper MLX, and local
+ * Kokoro TTS; these routes remain for optional cloud fallback experiments.
  *
  * Routes:
- *   POST /chat                → Anthropic Messages API (streaming)
- *   POST /transcribe-token    → AssemblyAI websocket token
+ *   POST /chat                → Anthropic Messages API (streaming, legacy/fallback)
+ *   POST /transcribe-token    → AssemblyAI websocket token (optional provider)
  */
 
 interface Env {

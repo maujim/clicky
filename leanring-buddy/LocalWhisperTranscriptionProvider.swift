@@ -152,11 +152,8 @@ private final class LocalWhisperTranscriptionSession: BuddyStreamingTranscriptio
     }
 
     private func transcribeWithLocalWhisper(wavAudioData: Data) async throws -> String {
-        try await LocalSpeechServiceBootstrap.shared.ensureServersRunning(
-            whisperModelName: localWhisperModelName,
-            ttsModelName: AppBundleConfiguration.stringValue(forKey: "LocalTTSModel") ?? "mlx-community/Kokoro-82M-4bit",
-            ttsVoiceName: AppBundleConfiguration.stringValue(forKey: "LocalTTSVoice") ?? "af_heart",
-            ttsLanguageCode: AppBundleConfiguration.stringValue(forKey: "LocalTTSLanguageCode") ?? "a"
+        try await LocalSpeechServiceBootstrap.shared.ensureSTTServerRunning(
+            whisperModelName: localWhisperModelName
         )
 
         guard let transcriptionURL = URL(string: "http://127.0.0.1:8765/transcribe") else {
