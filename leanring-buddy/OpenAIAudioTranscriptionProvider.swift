@@ -152,72 +152,47 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
     }
 
     private func transcribeWithLocalWhisper(wavAudioData: Data) async throws -> String {
-        let temporaryDirectoryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("clicky-whisper-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: temporaryDirectoryURL, withIntermediateDirectories: true)
+        try await LocalSpeechServiceBootstrap.shared.ensureServersRunning(
+            whisperModelName: localWhisperModelName,
+            ttsModelName: AppBundleConfiguration.stringValue(forKey: "LocalTTSModel") ?? "mlx-community/Kokoro-82M-4bit",
+            ttsVoiceName: AppBundleConfiguration.stringValue(forKey: "LocalTTSVoice") ?? "af_heart",
+            ttsLanguageCode: AppBundleConfiguration.stringValue(forKey: "LocalTTSLanguageCode") ?? "a"
+        )
 
-        defer {
-            try? FileManager.default.removeItem(at: temporaryDirectoryURL)
+        guard let transcriptionURL = URL(string: "http://127.0.0.1:8765/transcribe") else {
+            throw OpenAIAudioTranscriptionProviderError(message: "Invalid local STT server URL")
         }
 
-        let inputAudioFileURL = temporaryDirectoryURL.appendingPathComponent("input.wav")
-        try wavAudioData.write(to: inputAudioFileURL)
-
-        var processOutput = ""
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: resolveLocalUVExecutablePath())
-        process.arguments = [
-            "run", "--with", "mlx-whisper", "mlx_whisper",
-            inputAudioFileURL.path,
-            "--model", localWhisperModelName
+        let requestBody: [String: Any] = [
+            "audioBase64": wavAudioData.base64EncodedString()
         ]
-        process.environment = buildSubprocessEnvironment()
 
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
+        var request = URLRequest(url: transcriptionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
 
-        try process.run()
-        process.waitUntilExit()
+        let (data, response) = try await URLSession.shared.data(for: request)
 
-        let standardOutputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let standardErrorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let standardOutputText = String(data: standardOutputData, encoding: .utf8) ?? ""
-        let standardErrorText = String(data: standardErrorData, encoding: .utf8) ?? ""
-        processOutput = "\(standardOutputText)\n\(standardErrorText)"
-
-        let normalizedProcessOutput = processOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard process.terminationStatus == 0 else {
-            throw OpenAIAudioTranscriptionProviderError(
-                message: "Whisper MLX command failed: \(normalizedProcessOutput)"
-            )
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAIAudioTranscriptionProviderError(message: "Local STT server returned an invalid response")
         }
 
-        if normalizedProcessOutput.localizedCaseInsensitiveContains("filenotfounderror") ||
-            normalizedProcessOutput.localizedCaseInsensitiveContains("no such file or directory") ||
-            normalizedProcessOutput.localizedCaseInsensitiveContains("ffmpeg") ||
-            normalizedProcessOutput.localizedCaseInsensitiveContains("traceback") {
-            throw OpenAIAudioTranscriptionProviderError(
-                message: "Whisper MLX command failed: \(normalizedProcessOutput)"
-            )
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let responseText = String(data: data, encoding: .utf8) ?? "Unknown local STT server error"
+            throw OpenAIAudioTranscriptionProviderError(message: "Local STT server failed: \(responseText)")
         }
 
-        let normalizedLines = processOutput
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        if let finalTranscriptLine = normalizedLines.last(where: {
-            !$0.hasPrefix("[") &&
-            !$0.lowercased().contains("fetching") &&
-            !$0.lowercased().contains("downloading")
-        }) {
-            return finalTranscriptLine
+        guard let responseJSON = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw OpenAIAudioTranscriptionProviderError(message: "Local STT server returned malformed JSON")
         }
 
-        return ""
+        if let transcriptText = responseJSON["text"] as? String {
+            return transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        throw OpenAIAudioTranscriptionProviderError(message: "Local STT server response missing transcript text")
     }
 
     private func deliverFinalTranscript(_ transcriptText: String) {
@@ -232,35 +207,6 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         } else {
             stateQueue.sync(execute: work)
         }
-    }
-
-    private func resolveLocalUVExecutablePath() -> String {
-        let knownUVExecutablePaths = [
-            "/opt/homebrew/bin/uv",
-            "/usr/local/bin/uv",
-            "/Users/mukund/.local/bin/uv"
-        ]
-
-        if let firstExistingPath = knownUVExecutablePaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return firstExistingPath
-        }
-
-        return "uv"
-    }
-
-    private func buildSubprocessEnvironment() -> [String: String] {
-        var processEnvironment = ProcessInfo.processInfo.environment
-        let existingPath = processEnvironment["PATH"] ?? ""
-        let requiredPathSegments = ["/opt/homebrew/bin", "/usr/local/bin", "/bin", "/usr/bin"]
-
-        let mergedPath = ([existingPath] + requiredPathSegments)
-            .joined(separator: ":")
-            .split(separator: ":")
-            .map(String.init)
-            .filter { !$0.isEmpty }
-
-        processEnvironment["PATH"] = Array(NSOrderedSet(array: mergedPath)).compactMap { $0 as? String }.joined(separator: ":")
-        return processEnvironment
     }
 
     deinit {

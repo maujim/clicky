@@ -33,81 +33,51 @@ final class ElevenLabsTTSClient {
         self.session = URLSession(configuration: configuration)
     }
 
-    /// Synthesizes `text` via local Kokoro (mlx-audio) and plays the resulting audio.
+    /// Synthesizes `text` via the local TTS server and plays the resulting audio.
     func speakText(_ text: String) async throws {
         try Task.checkCancellation()
 
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedText.isEmpty else { return }
 
-        let temporaryDirectoryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("clicky-tts-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: temporaryDirectoryURL, withIntermediateDirectories: true)
+        try await LocalSpeechServiceBootstrap.shared.ensureServersRunning(
+            whisperModelName: AppBundleConfiguration.stringValue(forKey: "LocalWhisperModel") ?? "mlx-community/whisper-base-mlx-fp32",
+            ttsModelName: localKokoroModelName,
+            ttsVoiceName: localKokoroVoiceName,
+            ttsLanguageCode: localKokoroLanguageCode
+        )
 
-        defer {
-            try? FileManager.default.removeItem(at: temporaryDirectoryURL)
+        guard let localTTSServerURL = URL(string: "http://127.0.0.1:8766/speak") else {
+            throw NSError(domain: "LocalKokoroTTS", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid local TTS server URL"])
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: resolveLocalUVExecutablePath())
-        process.arguments = [
-            "run",
-            "--with", "mlx-audio",
-            "--with", "misaki",
-            "--with", "soundfile",
-            "python", "-m", "mlx_audio.tts.generate",
-            "--model", localKokoroModelName,
-            "--text", normalizedText,
-            "--voice", localKokoroVoiceName,
-            "--lang_code", localKokoroLanguageCode,
-            "--output_path", temporaryDirectoryURL.path
+        let requestBody: [String: Any] = [
+            "text": normalizedText
         ]
-        process.environment = buildSubprocessEnvironment()
 
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
+        var request = URLRequest(url: localTTSServerURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
 
-        try process.run()
-        process.waitUntilExit()
+        let (data, response) = try await session.data(for: request)
 
-        let standardOutputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let standardErrorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let standardOutputText = String(data: standardOutputData, encoding: .utf8) ?? ""
-        let standardErrorText = String(data: standardErrorData, encoding: .utf8) ?? ""
-
-        guard process.terminationStatus == 0 else {
-            let errorBody = "\(standardOutputText)\n\(standardErrorText)"
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NSError(
-                domain: "LocalKokoroTTS",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: "Local TTS command failed: \(errorBody)"]
-            )
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "LocalKokoroTTS", code: -1, userInfo: [NSLocalizedDescriptionKey: "Local TTS server returned an invalid response"])
         }
 
-        let generatedAudioFileURLs = (try? FileManager.default.contentsOfDirectory(
-            at: temporaryDirectoryURL,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ))?.filter {
-            ["wav", "mp3", "m4a"].contains($0.pathExtension.lowercased())
-        } ?? []
-
-        guard let newestGeneratedAudioFileURL = generatedAudioFileURLs.max(by: { lhs, rhs in
-            let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return lhsDate < rhsDate
-        }) else {
-            throw NSError(
-                domain: "LocalKokoroTTS",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Local TTS did not generate an audio file."]
-            )
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let responseText = String(data: data, encoding: .utf8) ?? "Unknown local TTS server error"
+            throw NSError(domain: "LocalKokoroTTS", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Local TTS server failed: \(responseText)"])
         }
 
-        let audioData = try Data(contentsOf: newestGeneratedAudioFileURL)
+        guard let responseJSON = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let audioBase64 = responseJSON["audioBase64"] as? String,
+              let audioData = Data(base64Encoded: audioBase64) else {
+            throw NSError(domain: "LocalKokoroTTS", code: -1, userInfo: [NSLocalizedDescriptionKey: "Local TTS server returned malformed audio payload"])
+        }
+
         let player = try AVAudioPlayer(data: audioData)
         self.audioPlayer = player
         player.play()
@@ -117,35 +87,6 @@ final class ElevenLabsTTSClient {
     /// Whether TTS audio is currently playing back.
     var isPlaying: Bool {
         audioPlayer?.isPlaying ?? false
-    }
-
-    private func resolveLocalUVExecutablePath() -> String {
-        let knownUVExecutablePaths = [
-            "/opt/homebrew/bin/uv",
-            "/usr/local/bin/uv",
-            "/Users/mukund/.local/bin/uv"
-        ]
-
-        if let firstExistingPath = knownUVExecutablePaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return firstExistingPath
-        }
-
-        return "uv"
-    }
-
-    private func buildSubprocessEnvironment() -> [String: String] {
-        var processEnvironment = ProcessInfo.processInfo.environment
-        let existingPath = processEnvironment["PATH"] ?? ""
-        let requiredPathSegments = ["/opt/homebrew/bin", "/usr/local/bin", "/bin", "/usr/bin"]
-
-        let mergedPath = ([existingPath] + requiredPathSegments)
-            .joined(separator: ":")
-            .split(separator: ":")
-            .map(String.init)
-            .filter { !$0.isEmpty }
-
-        processEnvironment["PATH"] = Array(NSOrderedSet(array: mergedPath)).compactMap { $0 as? String }.joined(separator: ":")
-        return processEnvironment
     }
 
     /// Stops any in-progress playback immediately.
