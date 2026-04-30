@@ -19,8 +19,25 @@ This branch is local-model focused: local vision, local Whisper MLX speech-to-te
 - macOS 14.2+ for ScreenCaptureKit
 - Xcode 15+
 - [`uv`](https://github.com/astral-sh/uv) available from Homebrew, `/usr/local/bin`, or `~/.local/bin`
-- A local OpenAI-compatible vision server listening at `http://127.0.0.1:8080/v1/chat/completions`
+- A local vision model server (run `./run-llama-server.sh`) listening at `http://127.0.0.1:8080/v1/chat/completions`
 
+### Vision model server
+
+```bash
+./run-llama-server.sh
+```
+
+This starts `llama-server` with the **Liquid VL 450M** model (F32) by default. The 1.6B BF16 model is available via `CLICKY_VISION_MODEL_SIZE=1.6B` but requires more GPU memory and may crash on Apple Silicon with limited unified memory.
+
+Environment overrides:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLICKY_VISION_MODEL_SIZE` | `450M` | `450M` or `1.6B` |
+| `CLICKY_VISION_HOST` | `127.0.0.1` | Server bind address |
+| `CLICKY_VISION_PORT` | `8080` | Server port |
+| `CLICKY_VISION_CTX_SIZE` | `4096` | Context window size |
+| `CLICKY_VISION_GPU_LAYERS` | `99` | GPU layer count |
 
 ### Run the app
 
@@ -47,6 +64,24 @@ The app starts two Python HTTP services through `uv`:
 
 The Swift bootstrap first looks for these scripts in the app bundle under `local_speech/`, then falls back to the source-tree path for development.
 
+Both servers are started automatically by the app. To test TTS standalone:
+
+```bash
+uv run --with mlx-audio --with 'misaki[en]' --with soundfile \
+  python local_speech/tts_server.py
+```
+
+### Troubleshooting
+
+**Vision model crashes with "Insufficient Memory" / "command buffer failed"**
+→ Stick with the 450M model (default). The 1.6B BF16 model easily exhausts Metal memory on M-series Macs during screenshot processing.
+
+**TTS fails with "There is no Stream(gpu, 0) in current thread"**
+→ The TTS server uses single-threaded `HTTPServer` (not `ThreadingHTTPServer`) because MLX GPU streams are thread-local. If you see this error, make sure the latest `tts_server.py` is running.
+
+**TTS fails with "Missing dependency: misaki"**
+→ Install with `misaki[en]` (the English tokenizer extra), not bare `misaki`. Run `uv run --with 'misaki[en]' ...` or restart the app so the bootstrap picks up the fix.
+
 ## Permissions the app needs
 
 - **Microphone** — push-to-talk voice capture
@@ -60,28 +95,33 @@ Menu bar-only macOS app with two `NSPanel` windows: one for the control panel dr
 
 The vision model can embed `[POINT:x,y:label:screenN]` tags in responses. Clicky parses those tags and animates the blue cursor to the referenced screen coordinate.
 
+### Key design decisions
+
+- **Single-threaded TTS server** — `HTTPServer` instead of `ThreadingHTTPServer` because MLX GPU streams are thread-local. All Kokoro inference runs on the same thread.
+- **450M default model** — the 1.6B BF16 model causes Metal OOM on many M-series Macs when processing screenshot images, dropping the HTTP connection and crashing llama-server.
+- **`misaki[en]`** — Kokoro needs the English tokenizer extra for text processing; bare `misaki` won't work.
+
 ## Project structure
 
 ```text
 leanring-buddy/                 # Swift source; typo stays
   CompanionManager.swift        # Central state machine
   CompanionPanelView.swift      # Menu bar panel UI
-  VLMClient.swift                # Local OpenAI-compatible vision client
+  VLMClient.swift               # Local OpenAI-compatible vision client
   LocalWhisperTranscriptionProvider.swift
   LocalTTSClient.swift          # Local Kokoro playback client
   OverlayWindow.swift           # Blue cursor overlay
   BuddyDictation*.swift         # Push-to-talk pipeline
+  AppBundleConfiguration.swift  # Server bootstrap, uv process management
+  MenuBarPanelManager.swift     # NSStatusItem + NSPanel lifecycle
+  ElementLocationDetector.swift # Point-of-interest detection in screenshots
+  GlobalPushToTalkShortcutMonitor.swift
 local_speech/
   stt_server.py                 # Local Whisper MLX HTTP server
   tts_server.py                 # Local Kokoro HTTP server
+run-llama-server.sh             # Convenience launcher for llama.cpp vision server
 CLAUDE.md                       # Symlink to AGENTS.md
 ```
-
-## Known cleanup work
-
-- `VLMClient.swift` is the local OpenAI-compatible vision client.
-- Local vision server startup/healthcheck/recovery needs to be made explicit.
-- `tts_server.py` still shells out for synthesis per request; keeping Kokoro warm in-process may reduce latency.
 
 ## Contributing
 
