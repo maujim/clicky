@@ -1,5 +1,5 @@
 //
-//  OpenAIAudioTranscriptionProvider.swift
+//  LocalWhisperTranscriptionProvider.swift
 //  leanring-buddy
 //
 //  Local transcription provider backed by mlx-whisper through uv.
@@ -8,7 +8,7 @@
 import AVFoundation
 import Foundation
 
-struct OpenAIAudioTranscriptionProviderError: LocalizedError {
+struct LocalWhisperTranscriptionProviderError: LocalizedError {
     let message: String
 
     var errorDescription: String? {
@@ -16,7 +16,7 @@ struct OpenAIAudioTranscriptionProviderError: LocalizedError {
     }
 }
 
-final class OpenAIAudioTranscriptionProvider: BuddyTranscriptionProvider {
+final class LocalWhisperTranscriptionProvider: BuddyTranscriptionProvider {
     private let localWhisperModelName = AppBundleConfiguration.stringValue(forKey: "LocalWhisperModel")
         ?? "mlx-community/whisper-base-mlx-fp32"
 
@@ -37,7 +37,7 @@ final class OpenAIAudioTranscriptionProvider: BuddyTranscriptionProvider {
         onFinalTranscriptReady: @escaping (String) -> Void,
         onError: @escaping (Error) -> Void
     ) async throws -> any BuddyStreamingTranscriptionSession {
-        return OpenAIAudioTranscriptionSession(
+        return LocalWhisperTranscriptionSession(
             localWhisperModelName: localWhisperModelName,
             keyterms: keyterms,
             onTranscriptUpdate: onTranscriptUpdate,
@@ -47,7 +47,7 @@ final class OpenAIAudioTranscriptionProvider: BuddyTranscriptionProvider {
     }
 }
 
-private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscriptionSession {
+private final class LocalWhisperTranscriptionSession: BuddyStreamingTranscriptionSession {
     let finalTranscriptFallbackDelaySeconds: TimeInterval = 8.0
 
     private static let targetSampleRate = 16_000
@@ -160,7 +160,7 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         )
 
         guard let transcriptionURL = URL(string: "http://127.0.0.1:8765/transcribe") else {
-            throw OpenAIAudioTranscriptionProviderError(message: "Invalid local STT server URL")
+            throw LocalWhisperTranscriptionProviderError(message: "Invalid local STT server URL")
         }
 
         let requestBody: [String: Any] = [
@@ -176,23 +176,23 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw OpenAIAudioTranscriptionProviderError(message: "Local STT server returned an invalid response")
+            throw LocalWhisperTranscriptionProviderError(message: "Local STT server returned an invalid response")
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
             let responseText = String(data: data, encoding: .utf8) ?? "Unknown local STT server error"
-            throw OpenAIAudioTranscriptionProviderError(message: "Local STT server failed: \(responseText)")
+            throw LocalWhisperTranscriptionProviderError(message: "Local STT server failed: \(responseText)")
         }
 
         guard let responseJSON = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw OpenAIAudioTranscriptionProviderError(message: "Local STT server returned malformed JSON")
+            throw LocalWhisperTranscriptionProviderError(message: "Local STT server returned malformed JSON")
         }
 
         if let transcriptText = responseJSON["text"] as? String {
             return transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        throw OpenAIAudioTranscriptionProviderError(message: "Local STT server response missing transcript text")
+        throw LocalWhisperTranscriptionProviderError(message: "Local STT server response missing transcript text")
     }
 
     private func deliverFinalTranscript(_ transcriptText: String) {

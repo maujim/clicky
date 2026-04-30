@@ -1,13 +1,13 @@
 //
 //  ClaudeAPI.swift
-//  OpenAI-compatible vision API implementation with streaming support
+//  Vision API implementation with streaming support for Claude via the Cloudflare proxy.
 //
 
 import Foundation
 
 /// Vision API helper with streaming for progressive text display.
-/// Uses an OpenAI-compatible `/v1/chat/completions` endpoint so local VLM
-/// servers (for example LM Studio, llama.cpp server, vLLM) can be used.
+/// Sends chat completions requests to the Cloudflare Worker proxy,
+/// which forwards them to Claude.
 class ClaudeAPI {
     private let apiURL: URL
     private let apiKey: String?

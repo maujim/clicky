@@ -67,9 +67,9 @@ final class CompanionManager: ObservableObject {
     // Response text is now displayed inline on the cursor overlay via
     // streamingResponseText, so no separate response overlay manager is needed.
 
-    /// Local OpenAI-compatible endpoint served by llama-server.
+    /// Local vision endpoint.
     /// Using 127.0.0.1 avoids IPv6 localhost (::1) connection issues when
-    /// llama-server is only bound to IPv4.
+    /// the vision server is only bound to IPv4.
     /// Example: `http://127.0.0.1:8080/v1/chat/completions`
     private static let localVisionChatCompletionsURL = "http://127.0.0.1:8080/v1/chat/completions"
 
@@ -752,7 +752,7 @@ final class CompanionManager: ObservableObject {
     /// local model or speech pipeline fails. Uses NSSpeechSynthesizer so it
     /// still works if local TTS generation fails.
     private func speakCreditsErrorFallback() {
-        let utterance = "I hit a local model error. Please make sure llama server is running on port eight zero eight zero, then try again."
+        let utterance = "I hit a local model error. Please make sure the vision server is running on port eight zero eight zero, then try again."
         let synthesizer = NSSpeechSynthesizer()
         synthesizer.startSpeaking(utterance)
         voiceState = .responding
