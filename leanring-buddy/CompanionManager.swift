@@ -68,8 +68,10 @@ final class CompanionManager: ObservableObject {
     // streamingResponseText, so no separate response overlay manager is needed.
 
     /// Local OpenAI-compatible endpoint served by llama-server.
-    /// Example: `http://localhost:8080/v1/chat/completions`
-    private static let localVisionChatCompletionsURL = "http://localhost:8080/v1/chat/completions"
+    /// Using 127.0.0.1 avoids IPv6 localhost (::1) connection issues when
+    /// llama-server is only bound to IPv4.
+    /// Example: `http://127.0.0.1:8080/v1/chat/completions`
+    private static let localVisionChatCompletionsURL = "http://127.0.0.1:8080/v1/chat/completions"
 
     /// Cloudflare Worker base URL is still used for non-chat providers (TTS + transcription token).
     private static let workerBaseURL = "https://your-worker-name.your-subdomain.workers.dev"
@@ -736,11 +738,11 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    /// Speaks a hardcoded error message using macOS system TTS when API
-    /// credits run out. Uses NSSpeechSynthesizer so it works even when
-    /// ElevenLabs is down.
+    /// Speaks a local fallback error message using macOS system TTS when the
+    /// local model or speech pipeline fails. Uses NSSpeechSynthesizer so it
+    /// still works if local TTS generation fails.
     private func speakCreditsErrorFallback() {
-        let utterance = "I'm all out of credits. Please DM Farza and tell him to bring me back to life."
+        let utterance = "I hit a local model error. Please make sure llama server is running on port eight zero eight zero, then try again."
         let synthesizer = NSSpeechSynthesizer()
         synthesizer.startSpeaking(utterance)
         voiceState = .responding

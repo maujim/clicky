@@ -59,6 +59,7 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
     private let onError: (Error) -> Void
 
     private let stateQueue = DispatchQueue(label: "com.learningbuddy.localwhisper.transcription")
+    private let stateQueueSpecificKey = DispatchSpecificKey<UInt8>()
     private let audioPCM16Converter = BuddyPCM16AudioConverter(
         targetSampleRate: Double(targetSampleRate)
     )
@@ -81,6 +82,7 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         self.onTranscriptUpdate = onTranscriptUpdate
         self.onFinalTranscriptReady = onFinalTranscriptReady
         self.onError = onError
+        self.stateQueue.setSpecific(key: stateQueueSpecificKey, value: 1)
     }
 
     func appendAudioBuffer(_ audioBuffer: AVAudioPCMBuffer) {
@@ -108,12 +110,12 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
     }
 
     func cancel() {
-        stateQueue.async {
-            self.isCancelled = true
-            self.bufferedPCM16AudioData.removeAll(keepingCapacity: false)
+        runOnStateQueueSynchronously {
+            isCancelled = true
+            bufferedPCM16AudioData.removeAll(keepingCapacity: false)
+            transcriptionTask?.cancel()
+            transcriptionTask = nil
         }
-
-        transcriptionTask?.cancel()
     }
 
     private func transcribeBufferedAudio(_ bufferedPCM16AudioData: Data) async {
@@ -163,12 +165,13 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
 
         var processOutput = ""
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.executableURL = URL(fileURLWithPath: resolveLocalUVExecutablePath())
         process.arguments = [
-            "uv", "run", "--with", "mlx-whisper", "mlx_whisper",
+            "run", "--with", "mlx-whisper", "mlx_whisper",
             inputAudioFileURL.path,
             "--model", localWhisperModelName
         ]
+        process.environment = buildSubprocessEnvironment()
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -184,9 +187,20 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         let standardErrorText = String(data: standardErrorData, encoding: .utf8) ?? ""
         processOutput = "\(standardOutputText)\n\(standardErrorText)"
 
+        let normalizedProcessOutput = processOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+
         guard process.terminationStatus == 0 else {
             throw OpenAIAudioTranscriptionProviderError(
-                message: "Whisper MLX command failed: \(processOutput.trimmingCharacters(in: .whitespacesAndNewlines))"
+                message: "Whisper MLX command failed: \(normalizedProcessOutput)"
+            )
+        }
+
+        if normalizedProcessOutput.localizedCaseInsensitiveContains("filenotfounderror") ||
+            normalizedProcessOutput.localizedCaseInsensitiveContains("no such file or directory") ||
+            normalizedProcessOutput.localizedCaseInsensitiveContains("ffmpeg") ||
+            normalizedProcessOutput.localizedCaseInsensitiveContains("traceback") {
+            throw OpenAIAudioTranscriptionProviderError(
+                message: "Whisper MLX command failed: \(normalizedProcessOutput)"
             )
         }
 
@@ -210,6 +224,43 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         guard !hasDeliveredFinalTranscript else { return }
         hasDeliveredFinalTranscript = true
         onFinalTranscriptReady(transcriptText)
+    }
+
+    private func runOnStateQueueSynchronously(_ work: () -> Void) {
+        if DispatchQueue.getSpecific(key: stateQueueSpecificKey) != nil {
+            work()
+        } else {
+            stateQueue.sync(execute: work)
+        }
+    }
+
+    private func resolveLocalUVExecutablePath() -> String {
+        let knownUVExecutablePaths = [
+            "/opt/homebrew/bin/uv",
+            "/usr/local/bin/uv",
+            "/Users/mukund/.local/bin/uv"
+        ]
+
+        if let firstExistingPath = knownUVExecutablePaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return firstExistingPath
+        }
+
+        return "uv"
+    }
+
+    private func buildSubprocessEnvironment() -> [String: String] {
+        var processEnvironment = ProcessInfo.processInfo.environment
+        let existingPath = processEnvironment["PATH"] ?? ""
+        let requiredPathSegments = ["/opt/homebrew/bin", "/usr/local/bin", "/bin", "/usr/bin"]
+
+        let mergedPath = ([existingPath] + requiredPathSegments)
+            .joined(separator: ":")
+            .split(separator: ":")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+
+        processEnvironment["PATH"] = Array(NSOrderedSet(array: mergedPath)).compactMap { $0 as? String }.joined(separator: ":")
+        return processEnvironment
     }
 
     deinit {

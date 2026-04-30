@@ -49,9 +49,9 @@ final class ElevenLabsTTSClient {
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.executableURL = URL(fileURLWithPath: resolveLocalUVExecutablePath())
         process.arguments = [
-            "uv", "run",
+            "run",
             "--with", "mlx-audio",
             "--with", "misaki",
             "--with", "soundfile",
@@ -62,6 +62,7 @@ final class ElevenLabsTTSClient {
             "--lang_code", localKokoroLanguageCode,
             "--output_path", temporaryDirectoryURL.path
         ]
+        process.environment = buildSubprocessEnvironment()
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -116,6 +117,35 @@ final class ElevenLabsTTSClient {
     /// Whether TTS audio is currently playing back.
     var isPlaying: Bool {
         audioPlayer?.isPlaying ?? false
+    }
+
+    private func resolveLocalUVExecutablePath() -> String {
+        let knownUVExecutablePaths = [
+            "/opt/homebrew/bin/uv",
+            "/usr/local/bin/uv",
+            "/Users/mukund/.local/bin/uv"
+        ]
+
+        if let firstExistingPath = knownUVExecutablePaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return firstExistingPath
+        }
+
+        return "uv"
+    }
+
+    private func buildSubprocessEnvironment() -> [String: String] {
+        var processEnvironment = ProcessInfo.processInfo.environment
+        let existingPath = processEnvironment["PATH"] ?? ""
+        let requiredPathSegments = ["/opt/homebrew/bin", "/usr/local/bin", "/bin", "/usr/bin"]
+
+        let mergedPath = ([existingPath] + requiredPathSegments)
+            .joined(separator: ":")
+            .split(separator: ":")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+
+        processEnvironment["PATH"] = Array(NSOrderedSet(array: mergedPath)).compactMap { $0 as? String }.joined(separator: ":")
+        return processEnvironment
     }
 
     /// Stops any in-progress playback immediately.
