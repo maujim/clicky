@@ -2,11 +2,12 @@
 //  LocalWhisperTranscriptionProvider.swift
 //  leanring-buddy
 //
-//  Local transcription provider backed by mlx-whisper through uv.
+//  Local transcription provider backed by Argmax WhisperKit.
 //
 
 import AVFoundation
 import Foundation
+import WhisperKit
 
 struct LocalWhisperTranscriptionProviderError: LocalizedError {
     let message: String
@@ -17,10 +18,7 @@ struct LocalWhisperTranscriptionProviderError: LocalizedError {
 }
 
 final class LocalWhisperTranscriptionProvider: BuddyTranscriptionProvider {
-    private let localWhisperModelName = AppBundleConfiguration.stringValue(forKey: "LocalWhisperModel")
-        ?? "mlx-community/whisper-base-mlx-fp32"
-
-    let displayName = "Whisper MLX"
+    let displayName = "Argmax WhisperKit"
     let requiresSpeechRecognitionPermission = false
 
     var isConfigured: Bool {
@@ -38,7 +36,6 @@ final class LocalWhisperTranscriptionProvider: BuddyTranscriptionProvider {
         onError: @escaping (Error) -> Void
     ) async throws -> any BuddyStreamingTranscriptionSession {
         return LocalWhisperTranscriptionSession(
-            localWhisperModelName: localWhisperModelName,
             keyterms: keyterms,
             onTranscriptUpdate: onTranscriptUpdate,
             onFinalTranscriptReady: onFinalTranscriptReady,
@@ -52,17 +49,14 @@ private final class LocalWhisperTranscriptionSession: BuddyStreamingTranscriptio
 
     private static let targetSampleRate = 16_000
 
-    private let localWhisperModelName: String
     private let keyterms: [String]
     private let onTranscriptUpdate: (String) -> Void
     private let onFinalTranscriptReady: (String) -> Void
     private let onError: (Error) -> Void
 
-    private let stateQueue = DispatchQueue(label: "com.learningbuddy.localwhisper.transcription")
+    private let stateQueue = DispatchQueue(label: "com.learningbuddy.argmaxwhisper.transcription")
     private let stateQueueSpecificKey = DispatchSpecificKey<UInt8>()
-    private let audioPCM16Converter = BuddyPCM16AudioConverter(
-        targetSampleRate: Double(targetSampleRate)
-    )
+    private let audioPCM16Converter = BuddyPCM16AudioConverter(targetSampleRate: Double(targetSampleRate))
 
     private var bufferedPCM16AudioData = Data()
     private var hasRequestedFinalTranscript = false
@@ -71,13 +65,11 @@ private final class LocalWhisperTranscriptionSession: BuddyStreamingTranscriptio
     private var transcriptionTask: Task<Void, Never>?
 
     init(
-        localWhisperModelName: String,
         keyterms: [String],
         onTranscriptUpdate: @escaping (String) -> Void,
         onFinalTranscriptReady: @escaping (String) -> Void,
         onError: @escaping (Error) -> Void
     ) {
-        self.localWhisperModelName = localWhisperModelName
         self.keyterms = keyterms
         self.onTranscriptUpdate = onTranscriptUpdate
         self.onFinalTranscriptReady = onFinalTranscriptReady
@@ -130,13 +122,8 @@ private final class LocalWhisperTranscriptionSession: BuddyStreamingTranscriptio
             return
         }
 
-        let wavAudioData = BuddyWAVFileBuilder.buildWAVData(
-            fromPCM16MonoAudio: bufferedPCM16AudioData,
-            sampleRate: Self.targetSampleRate
-        )
-
         do {
-            let transcriptText = try await transcribeWithLocalWhisper(wavAudioData: wavAudioData)
+            let transcriptText = try await transcribeWithArgmaxWhisperKit(bufferedPCM16AudioData: bufferedPCM16AudioData)
             guard !stateQueue.sync(execute: { isCancelled }) else { return }
 
             if !transcriptText.isEmpty {
@@ -146,53 +133,38 @@ private final class LocalWhisperTranscriptionSession: BuddyStreamingTranscriptio
             deliverFinalTranscript(transcriptText)
         } catch {
             guard !stateQueue.sync(execute: { isCancelled }) else { return }
-            print("[Whisper MLX] ❌ Transcription failed: \(error.localizedDescription)")
+            print("[Argmax WhisperKit] ❌ Transcription failed: \(error.localizedDescription)")
             onError(error)
         }
     }
 
-    private func transcribeWithLocalWhisper(wavAudioData: Data) async throws -> String {
-        try await LocalSpeechServiceBootstrap.shared.ensureServersRunning(
-            whisperModelName: localWhisperModelName,
-            ttsModelName: AppBundleConfiguration.stringValue(forKey: "LocalTTSModel") ?? "mlx-community/Kokoro-82M-4bit",
-            ttsVoiceName: AppBundleConfiguration.stringValue(forKey: "LocalTTSVoice") ?? "af_heart",
-            ttsLanguageCode: AppBundleConfiguration.stringValue(forKey: "LocalTTSLanguageCode") ?? "a"
+    private func transcribeWithArgmaxWhisperKit(bufferedPCM16AudioData: Data) async throws -> String {
+        let audioSamples = convertPCM16DataToFloatSamples(bufferedPCM16AudioData)
+        guard !audioSamples.isEmpty else { return "" }
+
+        let whisperKit = try await ArgmaxWhisperKitStore.shared.resolveWhisperKit()
+        let decodeOptions = DecodingOptions(language: "en")
+        let transcriptionResults = try await whisperKit.transcribe(
+            audioArray: audioSamples,
+            decodeOptions: decodeOptions
         )
 
-        guard let transcriptionURL = URL(string: "http://127.0.0.1:8765/transcribe") else {
-            throw LocalWhisperTranscriptionProviderError(message: "Invalid local STT server URL")
+        return transcriptionResults
+            .map(\.text)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func convertPCM16DataToFloatSamples(_ pcm16Data: Data) -> [Float] {
+        let sampleCount = pcm16Data.count / MemoryLayout<Int16>.size
+        guard sampleCount > 0 else { return [] }
+
+        return pcm16Data.withUnsafeBytes { rawBufferPointer in
+            let pcm16Buffer = rawBufferPointer.bindMemory(to: Int16.self)
+            return pcm16Buffer.prefix(sampleCount).map { pcm16Sample in
+                Float(pcm16Sample) / Float(Int16.max)
+            }
         }
-
-        let requestBody: [String: Any] = [
-            "audioBase64": wavAudioData.base64EncodedString()
-        ]
-
-        var request = URLRequest(url: transcriptionURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 120
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw LocalWhisperTranscriptionProviderError(message: "Local STT server returned an invalid response")
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            let responseText = String(data: data, encoding: .utf8) ?? "Unknown local STT server error"
-            throw LocalWhisperTranscriptionProviderError(message: "Local STT server failed: \(responseText)")
-        }
-
-        guard let responseJSON = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw LocalWhisperTranscriptionProviderError(message: "Local STT server returned malformed JSON")
-        }
-
-        if let transcriptText = responseJSON["text"] as? String {
-            return transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        throw LocalWhisperTranscriptionProviderError(message: "Local STT server response missing transcript text")
     }
 
     private func deliverFinalTranscript(_ transcriptText: String) {
@@ -211,5 +183,21 @@ private final class LocalWhisperTranscriptionSession: BuddyStreamingTranscriptio
 
     deinit {
         cancel()
+    }
+}
+
+private actor ArgmaxWhisperKitStore {
+    static let shared = ArgmaxWhisperKitStore()
+
+    private var whisperKit: WhisperKit?
+
+    func resolveWhisperKit() async throws -> WhisperKit {
+        if let whisperKit {
+            return whisperKit
+        }
+
+        let newWhisperKit = try await WhisperKit()
+        whisperKit = newWhisperKit
+        return newWhisperKit
     }
 }

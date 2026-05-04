@@ -62,7 +62,7 @@ enum BuddyTranscriptionProviderFactory {
 
             print("⚠️ Transcription: AssemblyAI preferred but not configured, falling back")
 
-            print("⚠️ Transcription: using local Whisper MLX as fallback")
+            print("⚠️ Transcription: using local Argmax WhisperKit as fallback")
             return localWhisperProvider
         }
 
