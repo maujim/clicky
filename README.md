@@ -10,15 +10,14 @@ Go crazy with this repo!! It's an MIT license.
 
 It's an AI teacher that lives as a buddy next to your cursor. It can see your screen, talk to you, and point at stuff. Kinda like having a real teacher next to you.
 
-This branch is local-model focused: local vision, local Whisper MLX speech-to-text, and local Kokoro TTS.
+This branch is local-model focused: local vision, local Argmax WhisperKit speech-to-text, and local Argmax TTSKit text-to-speech.
 
 ## Manual setup
 
 ### Prerequisites
 
-- macOS 14.2+ for ScreenCaptureKit
-- Xcode 15+
-- [`uv`](https://github.com/astral-sh/uv) available from Homebrew, `/usr/local/bin`, or `~/.local/bin`
+- macOS 15+ for Argmax TTSKit
+- Xcode 16+
 - A local vision model server (run `./run-llama-server.sh`) listening at `http://127.0.0.1:8080/v1/chat/completions`
 
 ### Vision model server
@@ -55,32 +54,19 @@ Do not use terminal `xcodebuild` for normal local runs; it can invalidate macOS 
 
 The app appears in your menu bar, not the dock. Click the icon, grant permissions, and use **Control + Option** for push-to-talk.
 
-### Local speech services
+### Local speech
 
-The app starts two Python HTTP services through `uv`:
+STT and TTS run in-process through Argmax's Swift package:
 
-- `local_speech/stt_server.py` on `127.0.0.1:8765` for Whisper MLX transcription
-- `local_speech/tts_server.py` on `127.0.0.1:8766` for Kokoro TTS
+- `WhisperKit()` handles local transcription with Argmax defaults.
+- `TTSKit()` handles local speech playback with Argmax defaults.
 
-The Swift bootstrap first looks for these scripts in the app bundle under `local_speech/`, then falls back to the source-tree path for development.
-
-Both servers are started automatically by the app. To test TTS standalone:
-
-```bash
-uv run --with mlx-audio --with 'misaki[en]' --with soundfile \
-  python local_speech/tts_server.py
-```
+Models are downloaded and cached by Argmax on first use.
 
 ### Troubleshooting
 
 **Vision model crashes with "Insufficient Memory" / "command buffer failed"**
 → Stick with the 450M model (default). The 1.6B BF16 model easily exhausts Metal memory on M-series Macs during screenshot processing.
-
-**TTS fails with "There is no Stream(gpu, 0) in current thread"**
-→ The TTS server uses single-threaded `HTTPServer` (not `ThreadingHTTPServer`) because MLX GPU streams are thread-local. If you see this error, make sure the latest `tts_server.py` is running.
-
-**TTS fails with "Missing dependency: misaki"**
-→ Install with `misaki[en]` (the English tokenizer extra), not bare `misaki`. Run `uv run --with 'misaki[en]' ...` or restart the app so the bootstrap picks up the fix.
 
 ## Permissions the app needs
 
@@ -91,15 +77,14 @@ uv run --with mlx-audio --with 'misaki[en]' --with soundfile \
 
 ## Architecture
 
-Menu bar-only macOS app with two `NSPanel` windows: one for the control panel dropdown and one for the transparent cursor overlay. Push-to-talk records audio through `AVAudioEngine`, transcribes locally with Whisper MLX, captures screenshots with ScreenCaptureKit, sends transcript + screenshots to a local OpenAI-compatible vision endpoint, streams text back into the cursor overlay, and speaks the response with local Kokoro TTS.
+Menu bar-only macOS app with two `NSPanel` windows: one for the control panel dropdown and one for the transparent cursor overlay. Push-to-talk records audio through `AVAudioEngine`, transcribes locally with Argmax WhisperKit, captures screenshots with ScreenCaptureKit, sends transcript + screenshots to a local OpenAI-compatible vision endpoint, streams text back into the cursor overlay, and speaks the response with Argmax TTSKit.
 
 The vision model can embed `[POINT:x,y:label:screenN]` tags in responses. Clicky parses those tags and animates the blue cursor to the referenced screen coordinate.
 
 ### Key design decisions
 
-- **Single-threaded TTS server** — `HTTPServer` instead of `ThreadingHTTPServer` because MLX GPU streams are thread-local. All Kokoro inference runs on the same thread.
-- **450M default model** — the 1.6B BF16 model causes Metal OOM on many M-series Macs when processing screenshot images, dropping the HTTP connection and crashing llama-server.
-- **`misaki[en]`** — Kokoro needs the English tokenizer extra for text processing; bare `misaki` won't work.
+- **Argmax speech stack** — STT and TTS run directly in Swift through WhisperKit/TTSKit instead of helper Python HTTP servers.
+- **450M default vision model** — the 1.6B BF16 model causes Metal OOM on many M-series Macs when processing screenshot images, dropping the HTTP connection and crashing llama-server.
 
 ## Project structure
 
@@ -108,17 +93,13 @@ leanring-buddy/                 # Swift source; typo stays
   CompanionManager.swift        # Central state machine
   CompanionPanelView.swift      # Menu bar panel UI
   VLMClient.swift               # Local OpenAI-compatible vision client
-  LocalWhisperTranscriptionProvider.swift
-  LocalTTSClient.swift          # Local Kokoro playback client
+  LocalWhisperTranscriptionProvider.swift # Local Argmax WhisperKit STT
+  LocalTTSClient.swift          # Local Argmax TTSKit playback
   OverlayWindow.swift           # Blue cursor overlay
   BuddyDictation*.swift         # Push-to-talk pipeline
-  AppBundleConfiguration.swift  # Server bootstrap, uv process management
+  AppBundleConfiguration.swift  # Bundle config helper
   MenuBarPanelManager.swift     # NSStatusItem + NSPanel lifecycle
-  ElementLocationDetector.swift # Point-of-interest detection in screenshots
   GlobalPushToTalkShortcutMonitor.swift
-local_speech/
-  stt_server.py                 # Local Whisper MLX HTTP server
-  tts_server.py                 # Local Kokoro HTTP server
 run-llama-server.sh             # Convenience launcher for llama.cpp vision server
 CLAUDE.md                       # Symlink to AGENTS.md
 ```

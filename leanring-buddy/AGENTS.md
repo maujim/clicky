@@ -1,28 +1,13 @@
-# AGENTS.md - leanring-buddy (Main App Target)
+# leanring-buddy Target Notes
 
-## Source Files
+This directory contains the main macOS app target. The authoritative project instructions live in the repository-root `AGENTS.md` / `CLAUDE.md`.
 
-### FloatingSessionButton.swift
-- `FloatingSessionButtonManager` — `@MainActor` class managing the `NSPanel` lifecycle
-  - `showFloatingButton()` — Creates/shows the panel in top-right of primary screen
-  - `hideFloatingButton()` — Hides panel (keeps it alive for quick re-show)
-  - `destroyFloatingButton()` — Removes panel permanently (session ended)
-  - `onFloatingButtonClicked` — Callback closure, set by ContentView to bring main window to front
-  - `floatingButtonPanel` — Exposed `NSPanel` reference for screenshot exclusion
-- `FloatingButtonView` — Private SwiftUI view with gradient circle, scale+glow hover animation, pointer cursor
+Important local reminders:
 
-### ContentView.swift
-- Receives `FloatingSessionButtonManager` via `@EnvironmentObject`
-- `isMainWindowCurrentlyFocused` — Tracks main window focus state
-- `configureFloatingButtonManager()` — Wires up the click callback
-- `startObservingMainWindowFocusChanges()` — Sets up `NSWindow` notification observers
-- `updateFloatingButtonVisibility()` — Core logic: show if running + not focused, hide otherwise
-- `bringMainWindowToFront()` — Activates app and orders main window front
-
-### ScreenshotManager.swift
-- `floatingButtonWindowToExcludeFromCaptures` — `NSWindow?` reference set by ContentView
-- `captureScreen()` — Matches the floating window to an `SCWindow` and excludes it from capture filter
-
-### leanring_buddyApp.swift
-- Owns `FloatingSessionButtonManager` as `@StateObject`
-- Injects it into ContentView via `.environmentObject()`
+- This is a menu bar-only SwiftUI/AppKit app, not a document/window-based app.
+- Speech is local and in-process through Argmax:
+  - STT: `LocalWhisperTranscriptionProvider.swift` using `WhisperKit()` defaults.
+  - TTS: `LocalTTSClient.swift` using `TTSKit()` defaults.
+- Vision chat uses `VLMClient.swift` against the local OpenAI-compatible endpoint.
+- Do not reintroduce the old Python `local_speech` STT/TTS servers, Cloudflare Worker proxy, AssemblyAI provider, or Claude API client.
+- Keep UI state changes on `@MainActor` and preserve the menu-bar/no-dock app pattern.

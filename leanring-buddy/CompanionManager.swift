@@ -562,7 +562,7 @@ final class CompanionManager: ObservableObject {
     // MARK: - AI Response Pipeline
 
     /// Captures a screenshot, sends it along with the transcript to the vision model,
-    /// and plays the response aloud via local TTS (Kokoro). The cursor stays in
+    /// and plays the response aloud via local Argmax TTSKit. The cursor stays in
     /// the spinner/processing state until TTS audio begins playing.
     /// The vision model response may include a [POINT:x,y:label] tag which triggers
     /// the buddy to fly to that element on screen.
