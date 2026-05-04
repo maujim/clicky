@@ -161,20 +161,6 @@ final class CompanionManager: ObservableObject {
         // well before the onboarding demo fires at ~40s into the video.
         _ = claudeAPI
 
-        Task {
-            do {
-                try await LocalSpeechServiceBootstrap.shared.ensureServersRunning(
-                    whisperModelName: AppBundleConfiguration.stringValue(forKey: "LocalWhisperModel") ?? "mlx-community/whisper-base-mlx-fp32",
-                    ttsModelName: AppBundleConfiguration.stringValue(forKey: "LocalTTSModel") ?? "mlx-community/Kokoro-82M-4bit",
-                    ttsVoiceName: AppBundleConfiguration.stringValue(forKey: "LocalTTSVoice") ?? "af_heart",
-                    ttsLanguageCode: AppBundleConfiguration.stringValue(forKey: "LocalTTSLanguageCode") ?? "a"
-                )
-                print("✅ Local speech servers ready")
-            } catch {
-                print("⚠️ Local speech server startup failed: \(error.localizedDescription)")
-            }
-        }
-
         // If the user already completed onboarding AND all permissions are
         // still granted, show the cursor overlay immediately. If permissions
         // were revoked (e.g. signing change), don't show the cursor — the
@@ -293,7 +279,6 @@ final class CompanionManager: ObservableObject {
         accessibilityCheckTimer?.invalidate()
         accessibilityCheckTimer = nil
 
-        LocalSpeechServiceBootstrap.shared.stopServers()
     }
 
     func refreshAllPermissions() {
