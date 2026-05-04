@@ -161,38 +161,9 @@ final class CompanionManager: ObservableObject {
         bindVoiceStateObservation()
         bindAudioPowerLevel()
         bindShortcutTransitions()
-        // Initialize the local vision client and start local speech services eagerly
-        // so the first interaction does not pay startup cost.
+        // Initialize the local vision client eagerly so the first interaction
+        // does not pay startup cost.
         _ = visionChatClient
-
-        Task {
-            do {
-                let configuredVoiceTranscriptionProvider = AppBundleConfiguration.stringValue(forKey: "VoiceTranscriptionProvider")
-                    ?? "local-whisper"
-                let configuredTTSModelName = AppBundleConfiguration.stringValue(forKey: "LocalTTSModel") ?? "mlx-community/Kokoro-82M-4bit"
-                let configuredTTSVoiceName = AppBundleConfiguration.stringValue(forKey: "LocalTTSVoice") ?? "af_heart"
-                let configuredTTSLanguageCode = AppBundleConfiguration.stringValue(forKey: "LocalTTSLanguageCode") ?? "a"
-
-                if configuredVoiceTranscriptionProvider == "apple-speech" {
-                    try await LocalSpeechServiceBootstrap.shared.ensureTTSServerRunning(
-                        ttsModelName: configuredTTSModelName,
-                        ttsVoiceName: configuredTTSVoiceName,
-                        ttsLanguageCode: configuredTTSLanguageCode
-                    )
-                    print("✅ Local TTS server ready")
-                } else {
-                    try await LocalSpeechServiceBootstrap.shared.ensureServersRunning(
-                        whisperModelName: AppBundleConfiguration.stringValue(forKey: "LocalWhisperModel") ?? "mlx-community/whisper-base-mlx-fp32",
-                        ttsModelName: configuredTTSModelName,
-                        ttsVoiceName: configuredTTSVoiceName,
-                        ttsLanguageCode: configuredTTSLanguageCode
-                    )
-                    print("✅ Local speech servers ready")
-                }
-            } catch {
-                print("⚠️ Local speech server startup failed: \(error.localizedDescription)")
-            }
-        }
 
         // If the user already completed onboarding AND all permissions are
         // still granted, show the cursor overlay immediately. If permissions
@@ -312,7 +283,6 @@ final class CompanionManager: ObservableObject {
         accessibilityCheckTimer?.invalidate()
         accessibilityCheckTimer = nil
 
-        LocalSpeechServiceBootstrap.shared.stopServers()
     }
 
     func refreshAllPermissions() {
