@@ -21,7 +21,7 @@ The runtime is fully local — local vision, local STT (Argmax WhisperKit), and 
 - **Voice Input**: Push-to-talk via `AVAudioEngine` + pluggable transcription-provider layer. System-wide keyboard shortcut via listen-only CGEvent tap.
 - **Element Pointing**: The vision model embeds `[POINT:x,y:label:screenN]` tags in responses. The overlay parses these, maps coordinates to the correct monitor, and animates the blue cursor along a bezier arc to the target.
 - **Concurrency**: `@MainActor` isolation, async/await throughout
-- **Analytics**: PostHog via `ClickyAnalytics.swift`
+- **Analytics**: Optional PostHog via `ClickyAnalytics.swift`, disabled by default with `EnablePostHogAnalytics=false` so the local runtime makes no analytics network calls
 
 ### Key Architecture Decisions
 
@@ -53,7 +53,7 @@ The runtime is fully local — local vision, local STT (Argmax WhisperKit), and 
 | ~~`OpenAIAPI.swift`~~ | — | Removed. Dead code from when the app used OpenAI directly. |
 | `LocalTTSClient.swift` | ~70 | Local Argmax TTSKit client. Streams generated speech through TTSKit playback. Exposes `isPlaying` for transient cursor scheduling. |
 | `DesignSystem.swift` | ~880 | Design system tokens — colors, corner radii, shared styles. All UI references `DS.Colors`, `DS.CornerRadius`, etc. |
-| `ClickyAnalytics.swift` | ~121 | PostHog analytics integration for usage tracking. |
+| `ClickyAnalytics.swift` | ~121 | Optional PostHog analytics wrapper, disabled by default unless `EnablePostHogAnalytics` is true. |
 | `WindowPositionManager.swift` | ~158 | Window placement logic, Screen Recording permission flow, and accessibility permission helpers. |
 | `AppBundleConfiguration.swift` | ~28 | Runtime configuration reader for keys stored in the app bundle Info.plist. |
 
